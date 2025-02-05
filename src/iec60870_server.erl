@@ -178,9 +178,35 @@ update_value(#?MODULE{name = Name, storage = Storage}, ID, NewObject) ->
   esubscribe:notify(Name, ID, NewValue).
 
 merge_objects(OldObject, #{ts := _} = NewObject) ->
-  maps:merge(OldObject, NewObject);
+  FilterObject = filter_object(OldObject, NewObject, true),
+  maps:merge(OldObject, FilterObject);
 merge_objects(OldObject, NewObject) ->
-  maps:merge(OldObject, NewObject#{ts => erlang:system_time(millisecond)}).
+  FilterObject = filter_object(OldObject, NewObject, false),
+  OldObjTS = maps:get(ts, OldObject, undefined),
+  if OldObjTS =:= undefined ->
+      maps:merge(OldObject, FilterObject#{ts => erlang:system_time(millisecond)})
+     ; true -> maps:merge(OldObject, FilterObject)
+  end.
+
+filter_object(OldObject, NewObject, TS) ->
+  OldObjType = maps:get(type, OldObject, undefined),
+  NewObjType = maps:get(type, NewObject, undefined),
+  NewObjVal = maps:get(value, NewObject),
+  NewObjTS = maps:get(ts, NewObject, undefined),
+
+  BaseObject = case {OldObjType, NewObjType} of
+    {OT, NT} when is_integer(OT), is_integer(NT), OT > NT ->
+      #{type => OT, value => NewObjVal}
+    ; {OT, NT} when is_integer(OT), is_integer(NT), OT < NT ->
+      #{type => NT, value => NewObjVal}
+    ; _ ->
+      #{type => NewObjType, value => NewObjVal}
+  end,
+
+  case TS of
+    true when NewObjTS =/= undefined -> BaseObject#{ts => NewObjTS}
+    ; _ -> BaseObject
+  end.
 
 %% +--------------------------------------------------------------+
 %% |                       Internal functions                     |
