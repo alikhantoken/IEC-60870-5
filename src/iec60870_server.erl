@@ -183,12 +183,10 @@ merge_objects(OldObject, #{ts := _} = NewObject) ->
 
 merge_objects(OldObject, NewObject) ->
   FilterObject = filter_object(OldObject, NewObject, false),
-
-  OT = maps:get(ts, OldObject, undefined),
-  case OT of
+  case maps:get(ts, OldObject, undefined) of
     undefined ->
-      maps:merge(OldObject, FilterObject#{ts => erlang:system_time(millisecond)})
-    ; _ -> maps:merge(OldObject, FilterObject)
+      maps:merge(OldObject, FilterObject#{ts => erlang:system_time(millisecond)});
+    _ -> maps:merge(OldObject, FilterObject)
   end.
 
 %% +--------------------------------------------------------------+
@@ -196,39 +194,35 @@ merge_objects(OldObject, NewObject) ->
 %% +--------------------------------------------------------------+
 
 what_are_types(OldObjType, NewObjType) ->
-  CorrespondingTypes = maps:get(OldObjType, ?MAPPING), 
+  CorrespondingTypes = maps:get(OldObjType, ?MAPPING),
   case lists:member(NewObjType, CorrespondingTypes) of
     true -> merge;
     false -> override
   end.
 
 filter_object(OldObject, NewObject, TS) ->
-  OT = maps:get(type, OldObject, undefined),
-  NT = maps:get(type, NewObject, undefined),
+  OldObjType = maps:get(type, OldObject, undefined),
+  NewObjType = maps:get(type, NewObject, undefined),
   NewObjVal = maps:get(value, NewObject, undefined),
   NewObjTS = maps:get(ts, NewObject, undefined),
 
-  TypesOut = case {OT, NT} of
-    {undefined, _} -> override
-    ; {_, undefined} -> override
-    ; {_, _} -> what_are_types(OT, NT)
+  TypesOut = case {OldObjType, NewObjType} of
+    {undefined, _} -> override; 
+    {_, undefined} -> override; 
+    {_, _} -> what_are_types(OldObjType, NewObjType)
   end,
 
   BaseObject = case TypesOut of
-    merge when OT < NT ->
-      #{type => NT, value => NewObjVal}
-    ; merge when OT > NT -> 
-      #{type => OT, value => NewObjVal}
-    ; override ->
-      #{type => NT, value => NewObjVal}
+    merge when OldObjType < NewObjType -> #{type => NewObjType, value => NewObjVal};
+    merge when OldObjType > NewObjType -> #{type => OldObjType, value => NewObjVal};
+    override -> #{type => NewObjType, value => NewObjVal}
   end,
 
-  case TS of
-    true when NewObjTS =/= undefined ->
-      BaseObject#{ts => NewObjTS}
-    ; false when NewObjTS =:= undefined , TypesOut =:= override ->
-      BaseObject#{ts => erlang:system_time(millisecond)}
-    ; _ -> BaseObject
+  case {TS, NewObjTS, TypesOut} of
+    {true, NewTS, _} when NewTS =/= undefined -> BaseObject#{ts => NewObjTS};
+    {false, undefined, override} when NewObjTS =:= undefined ->
+      BaseObject#{ts => erlang:system_time(millisecond)};
+    {_, _, _} -> BaseObject
   end.
 
 %% +--------------------------------------------------------------+
