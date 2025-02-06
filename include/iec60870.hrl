@@ -162,5 +162,18 @@
     ?M_EP_TC_1 => [?M_EP_TF_1],              % 19 => [40]
     ?M_EP_TF_1 => [?M_EP_TC_1]               % 40 => [19]
   }).
+-define (MAPPING_CATEGORIES, [
+  [?M_SP_NA_1, ?M_SP_TA_1, ?M_SP_TB_1],  % [ 1,  2, 30]
+  [?M_DP_NA_1, ?M_DP_TA_1, ?M_DP_TB_1],  % [ 3,  4, 31]
+  [?M_ST_NA_1, ?M_ST_TA_1, ?M_ST_TB_1],  % [ 5,  6, 32]
+  [?M_BO_NA_1, ?M_BO_TA_1, ?M_BO_TB_1],  % [ 7,  8, 33]
+  [?M_ME_NA_1, ?M_ME_TA_1, ?M_ME_TD_1],  % [ 9, 10, 34]
+  [?M_ME_NB_1, ?M_ME_TB_1, ?M_ME_TE_1],  % [11, 12, 35]
+  [?M_ME_NC_1, ?M_ME_TC_1, ?M_ME_TF_1],  % [13, 14, 36]
+  [?M_IT_NA_1, ?M_IT_TA_1, ?M_IT_TB_1],  % [15, 16, 37]
+  [?M_EP_TA_1, ?M_EP_TD_1],              % [17, 38]
+  [?M_EP_TB_1, ?M_EP_TE_1],              % [18, 39]
+  [?M_EP_TC_1, ?M_EP_TF_1]               % [19, 40]
+]).
 
 -endif.
