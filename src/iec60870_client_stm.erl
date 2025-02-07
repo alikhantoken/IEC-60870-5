@@ -773,23 +773,43 @@ send_asdu(Connection, ASDU) ->
 update_value(Name, Storage, ID, NewObject) ->
   OldObject =
     case ets:lookup(Storage, ID) of
-      [{_, Map}] ->
-        Map;
+      [{_, Map}] -> Map;
       _ -> #{
         value => undefined,
         group => undefined
       }
     end,
 
-  MergedObject = maps:merge(OldObject, NewObject#{
-    accept_ts => erlang:system_time(millisecond)
-  }),
+  MergedObject = merge_objects(OldObject, NewObject),
 
   ets:insert(Storage, {ID, MergedObject}),
-
   esubscribe:notify(Name, update, {ID, MergedObject}),
   esubscribe:notify(Name, ID, MergedObject).
 
 %% Alternating between connections
 switch_connection(_Connection = main) -> redundant;
 switch_connection(_Connection = redundant) -> main.
+
+%% +--------------------------------------------------------------+
+%% |                       Merge functions                        |
+%% +--------------------------------------------------------------+
+
+merge_objects(OldObject, NewObject) ->
+  OldType = maps:get(type, OldObject, undefined),
+  NewType = maps:get(type, NewObject, undefined),
+
+  ResultObject = 
+    case OldType of
+      NewType -> maps:merge(OldObject, NewObject);
+      _Differs ->
+        case ?MAPPING of
+          #{OldType := NewType} ->
+            maps:merge(OldObject, NewObject#{type => OldType});
+          _Other -> NewObject
+        end
+    end,
+
+  maps:merge(
+    #{group => undefined},
+    ResultObject#{accept_ts => erlang:system_time(millisecond)}
+  ).

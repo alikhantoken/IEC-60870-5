@@ -166,58 +166,38 @@ update_value(#?MODULE{name = Name, storage = Storage}, ID, NewObject) ->
   OldObject =
     case ets:lookup(Storage, ID) of
       [{_, Map}] -> Map;
-      _ -> #{group => undefined}
+      _ -> #{}
     end,
 
   MergedObject = merge_objects(OldObject, NewObject),
-  NewValue = check_value(MergedObject),
 
-  ets:insert(Storage, {ID, NewValue}),
-
-  esubscribe:notify(Name, update, {ID, NewValue}),
-  esubscribe:notify(Name, ID, NewValue).
+  ets:insert(Storage, {ID, MergedObject}),
+  esubscribe:notify(Name, update, {ID, MergedObject}),
+  esubscribe:notify(Name, ID, MergedObject).
 
 %% +--------------------------------------------------------------+
 %% |                       Merge functions                        |
 %% +--------------------------------------------------------------+
 
-% (integer, integer) -> boolean
-is_current_type(OldObjType, NewObjType) ->
-  Categories = ?MAPPING_CATEGORIES,
-  lists:any(
-    fun(Category) ->
-      lists:member(OldObjType, Category) andalso lists:member(NewObjType, Category)
+merge_objects(OldObject, NewObject) ->
+  OldType = maps:get(type, OldObject, undefined),
+  NewType = maps:get(type, NewObject, undefined),
+
+  ResultObject = 
+    case OldType of
+      NewType -> maps:merge(OldObject, NewObject);
+      _Differs ->
+        case ?MAPPING of
+          #{OldType := NewType} ->
+            maps:merge(OldObject, NewObject#{type => OldType});
+          _Other -> NewObject
+        end
     end,
-    Categories
+
+  maps:merge(
+    #{group => undefined},
+    ResultObject#{accept_ts => erlang:system_time(millisecond)}
   ).
-
-% (integer, integer) -> atom
-what_type(OldType, NewType) ->
-  CorrespondingTypes = maps:get(OldType, ?MAPPING),
-  case lists:member(NewType, CorrespondingTypes) of
-    true -> merge;
-    false -> override
-  end.
-
-merge_objects(OldObject, NewObject) when not is_map_key(type, OldObject) ->
-  maps:merge(OldObject, NewObject);
-
-merge_objects(#{type := OldType} = OldObject, #{type := NewType, value := NewVal, ts := NewTS}) ->
-  case what_type(OldType, NewType) of
-    merge when OldType < NewType -> OldObject#{type => NewType, value => NewVal, ts => NewTS};
-    merge when OldType > NewType -> OldObject#{type => OldType, value => NewVal, ts => NewTS};
-    override -> OldObject#{type => NewType, value => NewVal, ts => NewTS}
-  end;
-
-merge_objects(#{type := OldType, ts := OldTS} = OldObject, #{type := NewType, value := NewVal}) ->
-  case what_type(OldType, NewType) of
-    override ->
-      case is_current_type(OldType, NewType) of
-        true -> OldObject#{type => OldType, value => NewVal, ts => OldTS};
-        false -> OldObject#{type => NewType, value => NewVal, ts => erlang:system_time(millisecond)}
-      end;
-    merge -> OldObject#{type => OldType, value => NewVal, ts => OldTS}
-  end.
 
 %% +--------------------------------------------------------------+
 %% |                       Internal functions                     |
@@ -340,15 +320,15 @@ check_setting(groups, undefined) ->
 check_setting(Key, _) ->
   throw({invalid_settings, Key}).
 
-%% The object data must contain a 'value' key
-check_value(#{value := Value} = ObjectData) when is_number(Value) ->
-  ObjectData;
-%% If an object's value is undefined, then we set its value
-%% to 0 and enable the quality bit for invalid values
-check_value(#{value := none} = ObjectData) ->
-  ObjectData#{value => 0};
-check_value(#{value := undefined} = ObjectData) ->
-  ObjectData#{value => 0};
-%% Key 'value' is missing, incorrect object passed
-check_value(_Value) ->
-  throw({error, value_parameter_missing}).
+% %% The object data must contain a 'value' key
+% check_value(#{value := Value} = ObjectData) when is_number(Value) ->
+%   ObjectData;
+% %% If an object's value is undefined, then we set its value
+% %% to 0 and enable the quality bit for invalid values
+% check_value(#{value := none} = ObjectData) ->
+%   ObjectData#{value => 0};
+% check_value(#{value := undefined} = ObjectData) ->
+%   ObjectData#{value => 0};
+% %% Key 'value' is missing, incorrect object passed
+% check_value(_Value) ->
+%   throw({error, value_parameter_missing}).
