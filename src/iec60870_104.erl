@@ -27,6 +27,7 @@
 
 %% Default port settings
 -define(DEFAULT_SETTINGS, #{
+  connect_attempts => 3,
   address => local,
   port => ?DEFAULT_PORT,
   t1 => 30000,
@@ -125,7 +126,8 @@ start_client(InSettings) ->
   Settings = check_settings(maps:merge(?DEFAULT_SETTINGS#{
     host => ?REQUIRED
   }, InSettings)),
-  PID = spawn_link(fun() -> init_client(Owner, Settings) end),
+  Attempts = maps:get(connect_attempts, Settings ),
+  PID = spawn_link(fun() -> init_client(Attempts, Owner, Settings) end),
   receive
     {ready, PID} -> PID;
     {'EXIT', PID, Reason} -> throw(Reason)
@@ -233,10 +235,10 @@ loop(#state{
   end.
 
 %% Client connection sequence
-init_client(Owner, #{
+init_client(Attempts, Owner, #{
   host := Host,
   port := Port
-} = Settings) ->
+} = Settings) when Attempts > 0->
   case gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}], ?CONNECT_TIMEOUT) of
     {ok, Socket} ->
       % Sending the activation command and waiting for its confirmation
@@ -256,11 +258,14 @@ init_client(Owner, #{
         {error, ActivateError} ->
           ?LOGWARNING("client connection activation error: ~p", [ActivateError]),
           gen_tcp:close(Socket),
-          exit(ActivateError)
+          init_client( Attempts - 1, Owner, Settings )
       end;
     {error, ConnectError} ->
-      exit(ConnectError)
-  end.
+      ?LOGWARNING("client open socket error: ~p", [ConnectError]),
+      init_client( Attempts - 1, Owner, Settings )
+  end;
+init_client(_Attempts, _Owner, _Settings)->
+  exit( connect_error ).
 
 %% Connection activation wait
 wait_activate(Socket, Code, Buffer) ->
@@ -563,6 +568,9 @@ check_setting(t2, Timeout)
 
 check_setting(t3, Timeout)
   when is_number(Timeout); Timeout =:= infinity -> Timeout;
+
+check_setting(connect_attempts, Attempts)
+  when is_integer(Attempts) -> Attempts;
 
 check_setting(Key, Value)->
   throw({invalid_setting, {setting, Key, value, Value}}).
