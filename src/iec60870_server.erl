@@ -197,7 +197,8 @@ merge_objects(OldObject, NewObject) ->
   maps:merge(
     #{group => undefined},
     ResultObject#{accept_ts => erlang:system_time(millisecond)}
-  ).
+  ),
+  check_value(ResultObject).
 
 %% +--------------------------------------------------------------+
 %% |                       Internal functions                     |
@@ -320,15 +321,15 @@ check_setting(groups, undefined) ->
 check_setting(Key, _) ->
   throw({invalid_settings, Key}).
 
-% %% The object data must contain a 'value' key
-% check_value(#{value := Value} = ObjectData) when is_number(Value) ->
-%   ObjectData;
-% %% If an object's value is undefined, then we set its value
-% %% to 0 and enable the quality bit for invalid values
-% check_value(#{value := none} = ObjectData) ->
-%   ObjectData#{value => 0};
-% check_value(#{value := undefined} = ObjectData) ->
-%   ObjectData#{value => 0};
-% %% Key 'value' is missing, incorrect object passed
-% check_value(_Value) ->
-%   throw({error, value_parameter_missing}).
+%% The object data must contain a 'value' key
+check_value(#{value := Value} = ObjectData) when is_number(Value) ->
+  ObjectData;
+%% If an object's value is undefined, then we set its value
+%% to 0 and enable the quality bit for invalid values
+check_value(#{value := none} = ObjectData) ->
+  ObjectData#{value => 0};
+check_value(#{value := undefined} = ObjectData) ->
+  ObjectData#{value => 0};
+%% Key 'value' is missing, incorrect object passed
+check_value(_Value) ->
+  throw({error, value_parameter_missing}).
