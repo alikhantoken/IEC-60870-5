@@ -188,8 +188,7 @@ merge_objects(OldObject, NewObject) ->
       NewType -> maps:merge(OldObject, NewObject);
       _Differs ->
         case ?MAPPING of
-          #{OldType := NewType} ->
-            maps:merge(OldObject, NewObject#{type => OldType});
+          #{OldType := NewType} -> maps:merge(OldObject, NewObject#{type => OldType});
           _Other -> NewObject
         end
     end,
