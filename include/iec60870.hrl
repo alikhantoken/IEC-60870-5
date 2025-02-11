@@ -77,8 +77,6 @@
 -define(M_ME_TF_1, 16#24). % 36: IEEE STD 754 + QDS + CP56Time2A         | Measured value, short floating point value with time tag
 -define(M_IT_TB_1, 16#25). % 37: BCR + CP56Time2A                        | Integrated totals with time tag
 -define(M_EP_TD_1, 16#26). % 38: CP16Time2A + CP56Time2A                 | Event of protection equipment with time tag
--define(M_EP_TE_1, 16#27). % 39: SEP + QDP + CP16Time2a + CP56Time2a     | Packed start events of protection equipment with time tag CP56time2a
--define(M_EP_TF_1, 16#28). % 40: OCI + QDP + CP16Time2a + CP56Time2a     | Packed output circuit information of protection equipment with time tag CP56Time2a
 -define(M_EI_NA_1, 16#46). % 70: Initialization Ending
 
 %% Remote control commands without time tag
