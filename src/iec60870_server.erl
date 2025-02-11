@@ -193,11 +193,11 @@ merge_objects(OldObject, NewObject) ->
         end
     end,
 
-  maps:merge(
-    #{group => undefined},
+  Output = maps:merge(
+    #{value => undefined, group => undefined},
     ResultObject#{accept_ts => erlang:system_time(millisecond)}
   ),
-  check_value(ResultObject).
+  check_value(Output).
 
 %% +--------------------------------------------------------------+
 %% |                       Internal functions                     |

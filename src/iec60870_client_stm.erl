@@ -797,10 +797,7 @@ update_value(Name, Storage, ID, NewObject) ->
   OldObject =
     case ets:lookup(Storage, ID) of
       [{_, Map}] -> Map;
-      _ -> #{
-        value => undefined,
-        group => undefined
-      }
+      _ -> #{}
     end,
 
   MergedObject = merge_objects(OldObject, NewObject),
@@ -831,11 +828,11 @@ merge_objects(OldObject, NewObject) ->
         end
     end,
 
-  maps:merge(
-    #{group => undefined},
+  Output = maps:merge(
+    #{value => undefined, group => undefined},
     ResultObject#{accept_ts => erlang:system_time(millisecond)}
   ),
-  check_value(ResultObject).
+  check_value(Output).
 
 %% The object data must contain a 'value' key
 check_value(#{value := Value} = ObjectData) when is_number(Value) ->
