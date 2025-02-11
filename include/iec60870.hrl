@@ -142,10 +142,6 @@
 
     ?M_IT_TA_1 => ?M_IT_NA_1,  % 16 => 15
     ?M_IT_TB_1 => ?M_IT_NA_1   % 37 => 15
-
-    % ?M_EP_TD_1 => ?M_EP_TA_1,  % 38 => 17
-    % ?M_EP_TE_1 => ?M_EP_TB_1,  % 39 => 18
-    % ?M_EP_TF_1 => ?M_EP_TC_1   % 40 => 19
   }).
 
 -endif.
