@@ -796,23 +796,53 @@ send_asdu(Connection, ASDU) ->
 update_value(Name, Storage, ID, NewObject) ->
   OldObject =
     case ets:lookup(Storage, ID) of
-      [{_, Map}] ->
-        Map;
-      _ -> #{
-        value => undefined,
-        group => undefined
-      }
+      [{_, Map}] -> Map;
+      _ -> #{}
     end,
 
-  MergedObject = maps:merge(OldObject, NewObject#{
-    accept_ts => erlang:system_time(millisecond)
-  }),
+  MergedObject = merge_objects(OldObject, NewObject),
 
   ets:insert(Storage, {ID, MergedObject}),
-
   esubscribe:notify(Name, update, {ID, MergedObject}),
   esubscribe:notify(Name, ID, MergedObject).
 
 %% Alternating between connections
 switch_connection(_Connection = main) -> redundant;
 switch_connection(_Connection = redundant) -> main.
+
+%% +--------------------------------------------------------------+
+%% |                       Merge functions                        |
+%% +--------------------------------------------------------------+
+
+merge_objects(OldObject, NewObject) ->
+  OldType = maps:get(type, OldObject, undefined),
+  NewType = maps:get(type, NewObject, undefined),
+
+  ResultObject = 
+    case OldType of
+      NewType -> maps:merge(OldObject, NewObject);
+      _Differs ->
+        case ?MAPPING of
+          #{OldType := NewType} -> maps:merge(OldObject, NewObject#{type => OldType});
+          _Other -> NewObject
+        end
+    end,
+
+  Output = maps:merge(
+    #{value => undefined, group => undefined},
+    ResultObject#{accept_ts => erlang:system_time(millisecond)}
+  ),
+  check_value(Output).
+
+%% The object data must contain a 'value' key
+check_value(#{value := Value} = ObjectData) when is_number(Value) ->
+  ObjectData;
+%% If an object's value is undefined, then we set its value
+%% to 0 and enable the quality bit for invalid values
+check_value(#{value := none} = ObjectData) ->
+  ObjectData#{value => 0};
+check_value(#{value := undefined} = ObjectData) ->
+  ObjectData#{value => 0};
+%% Key 'value' is missing, incorrect object passed
+check_value(_Value) ->
+  throw({error, value_parameter_missing}).

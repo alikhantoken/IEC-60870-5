@@ -166,21 +166,38 @@ update_value(#?MODULE{name = Name, storage = Storage}, ID, NewObject) ->
   OldObject =
     case ets:lookup(Storage, ID) of
       [{_, Map}] -> Map;
-      _ -> #{group => undefined}
+      _ -> #{}
     end,
 
   MergedObject = merge_objects(OldObject, NewObject),
-  NewValue = check_value(MergedObject),
 
-  ets:insert(Storage, {ID, NewValue}),
+  ets:insert(Storage, {ID, MergedObject}),
+  esubscribe:notify(Name, update, {ID, MergedObject}),
+  esubscribe:notify(Name, ID, MergedObject).
 
-  esubscribe:notify(Name, update, {ID, NewValue}),
-  esubscribe:notify(Name, ID, NewValue).
+%% +--------------------------------------------------------------+
+%% |                       Merge functions                        |
+%% +--------------------------------------------------------------+
 
-merge_objects(OldObject, #{ts := _} = NewObject) ->
-  maps:merge(OldObject, NewObject);
 merge_objects(OldObject, NewObject) ->
-  maps:merge(OldObject, NewObject#{ts => erlang:system_time(millisecond)}).
+  OldType = maps:get(type, OldObject, undefined),
+  NewType = maps:get(type, NewObject, undefined),
+
+  ResultObject = 
+    case OldType of
+      NewType -> maps:merge(OldObject, NewObject);
+      _Differs ->
+        case ?MAPPING of
+          #{OldType := NewType} -> maps:merge(OldObject, NewObject#{type => OldType});
+          _Other -> NewObject
+        end
+    end,
+
+  Output = maps:merge(
+    #{value => undefined, group => undefined},
+    ResultObject#{accept_ts => erlang:system_time(millisecond)}
+  ),
+  check_value(Output).
 
 %% +--------------------------------------------------------------+
 %% |                       Internal functions                     |
