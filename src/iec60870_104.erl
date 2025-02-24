@@ -123,9 +123,9 @@ stop_server(ServerPort) ->
 
 start_client(InSettings) ->
   Owner = self(),
-  Settings = check_settings(maps:merge(?DEFAULT_SETTINGS#{
+  Settings = check_settings(maps:merge(maps:merge(?DEFAULT_SETTINGS,#{
     host => ?REQUIRED
-  }, InSettings)),
+  }), InSettings)),
   Attempts = maps:get(connect_attempts, Settings ),
   PID = spawn_link(fun() -> init_client(Attempts, Owner, Settings) end),
   receive
