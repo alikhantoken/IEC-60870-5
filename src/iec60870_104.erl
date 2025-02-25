@@ -123,10 +123,10 @@ stop_server(ServerPort) ->
 
 start_client(InSettings) ->
   Owner = self(),
-  Settings = check_settings(maps:merge(maps:merge(?DEFAULT_SETTINGS,#{
+  Settings = check_settings(maps:merge(maps:merge(?DEFAULT_SETTINGS, #{
     host => ?REQUIRED
   }), InSettings)),
-  Attempts = maps:get(connect_attempts, Settings ),
+  Attempts = maps:get(connect_attempts, Settings),
   PID = spawn_link(fun() -> init_client(Attempts, Owner, Settings) end),
   receive
     {ready, PID} -> PID;
@@ -166,7 +166,7 @@ accept_connection(ListenSocket, #{port := Port} = Settings, Root) ->
         gen_tcp:close(Socket),
         exit(ActivateError)
     end
-  end).
+        end).
 
 accept_loop(ListenSocket, Root) ->
   case gen_tcp:accept(ListenSocket) of
@@ -180,28 +180,25 @@ accept_loop(ListenSocket, Root) ->
 
 init_loop(#state{
   settings = #{w := W}
-} = State0) ->
-  State = start_t3(State0),
-  loop(State#state{
+} = StateIn) ->
+  StateOut = parse_packet(StateIn#state{
     vs = 0,
     vr = 0,
     vw = W,
     sent = []
-  }).
+  }),
+  loop(StateOut).
 
 loop(#state{
   settings = #{k := K},
-  buffer = Buffer,
   socket = Socket,
   sent = Sent
 } = State) ->
   receive
     % Data is received from the transport level (TCP)
-    {tcp, Socket, Data}->
-      {Packets, TailBuffer} = split_into_packets(<<Buffer/binary, Data/binary>>),
-      State1 = handle_packets(Packets, State),
-      State2 = start_t3(State1),
-      loop(State2#state{buffer = TailBuffer});
+    {tcp, Socket, Data} ->
+      NewState = parse_packet(Data, State),
+      loop(NewState);
 
     % A packet is received from the connection
     % It is crucial to note that we need to compare the sent packets
@@ -211,13 +208,13 @@ loop(#state{
     {asdu, From, Reference, ASDU} when length(Sent) =< K ->
       From ! {confirm, Reference},
       State1 = send_i_packet(ASDU, State),
-      State2 = start_t1(State1),
-      loop(State2);
+      NewState = start_t1(State1),
+      loop(NewState);
 
     % Commands that were sent to self and others are ignored and unexpected
     {Self, Command} when Self =:= self() ->
-      State1 = handle_command(Command, State),
-      loop(State1);
+      NewState = handle_command(Command, State),
+      loop(NewState);
 
     % Errors from TCP
     {tcp_closed, Socket} ->
@@ -238,7 +235,7 @@ loop(#state{
 init_client(Attempts, Owner, #{
   host := Host,
   port := Port
-} = Settings) when Attempts > 0->
+} = Settings) when Attempts > 0 ->
   case gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}], ?CONNECT_TIMEOUT) of
     {ok, Socket} ->
       % Sending the activation command and waiting for its confirmation
@@ -258,14 +255,14 @@ init_client(Attempts, Owner, #{
         {error, ActivateError} ->
           ?LOGWARNING("client connection activation error: ~p", [ActivateError]),
           gen_tcp:close(Socket),
-          init_client( Attempts - 1, Owner, Settings )
+          init_client(Attempts - 1, Owner, Settings)
       end;
     {error, ConnectError} ->
       ?LOGWARNING("client open socket error: ~p", [ConnectError]),
-      init_client( Attempts - 1, Owner, Settings )
+      init_client(Attempts - 1, Owner, Settings)
   end;
-init_client(_Attempts, _Owner, _Settings)->
-  exit( connect_error ).
+init_client(_Attempts, _Owner, _Settings) ->
+  exit(connect_error).
 
 %% Connection activation wait
 wait_activate(Socket, Code, Buffer) ->
@@ -295,7 +292,7 @@ handle_command(t1, _State) ->
 
 %% T2 - Acknowledge timeout
 handle_command(t2, State) ->
-  confirm_received_counter( State );
+  confirm_received_counter(State);
 
 %% T3 - Heartbeat timeout (Test frames)
 handle_command(t3, #state{
@@ -307,7 +304,7 @@ handle_command(t3, #state{
   % We start the t3 timer with T1 duration because according to
   % IEC 60870-5-104 the confirmation of test frame should be sent back
   % within T1
-  Timer = init_timer( t3, T1 ),
+  Timer = init_timer(t3, T1),
   State#state{t3 = {confirm, Timer}};
 
 handle_command(t3, #state{
@@ -317,6 +314,13 @@ handle_command(t3, #state{
 
 handle_command(InvalidCommand, _State) ->
   throw({invalid_command, InvalidCommand}).
+
+parse_packet(Data, #state{
+  buffer = Buffer
+} = StateIn) ->
+  {Packets, TailBuffer} = split_into_packets(<<Buffer/binary, Data/binary>>),
+  StateOut = handle_packets(Packets, StateIn),
+  start_t3(StateOut#state{buffer = TailBuffer}).
 
 %% Attaching the beginning of the packet and its size to the frame
 create_apdu(Frame) ->
@@ -328,7 +332,7 @@ split_into_packets(Data) ->
 
 split_into_packets(<<?START_BYTE, Size:8, Rest/binary>> = Data, Packets) ->
   case Rest of
-    <<Packet:Size/binary, Tail/binary>>->
+    <<Packet:Size/binary, Tail/binary>> ->
       split_into_packets(Tail, [Packet | Packets]);
     _ ->
       {lists:reverse(Packets), Data}
@@ -342,11 +346,11 @@ split_into_packets(<<>>, Packets) ->
 split_into_packets(InvalidData, _) ->
   throw({invalid_input_data_format, InvalidData}).
 
-handle_packets([Packet | Rest], State)->
+handle_packets([Packet | Rest], State) ->
   {Type, Data} = parse_packet(Packet),
   State1 = handle_packet(Type, Data, State),
   handle_packets(Rest, State1);
-handle_packets([], State)->
+handle_packets([], State) ->
   State.
 
 %%% +--------------------------------------------------------------+
@@ -385,12 +389,12 @@ parse_packet(<<
   LSB_R:7, 0:1,       % Control Field 3
   MSB_R:8,            % Control Field 4
   ASDU/binary
->>)->
+>>) ->
   <<Counter_S:15>> = <<MSB_S:8, LSB_S:7>>,
   <<Counter_R:15>> = <<MSB_R:8, LSB_R:7>>,
   {i, {Counter_S, Counter_R, ASDU}};
 
-parse_packet(InvalidFrame)->
+parse_packet(InvalidFrame) ->
   throw({invalid_frame, InvalidFrame}).
 
 %%% +--------------------------------------------------------------+
@@ -427,7 +431,7 @@ create_i_packet(ASDU, #state{
 %%% |                     U-type packet handle                     |
 %%% +--------------------------------------------------------------+
 
-handle_packet(u, ?START_DT_CONFIRM, State)->
+handle_packet(u, ?START_DT_CONFIRM, State) ->
   ?LOGWARNING("unexpected START_DT_CONFIRM packet was received!"),
   State;
 
@@ -443,7 +447,7 @@ handle_packet(u, ?TEST_FRAME_CONFIRM, #state{
   reset_timer(t3, Timer),
   State#state{t3 = undefined};
 
-handle_packet(u, _Data, State)->
+handle_packet(u, _Data, State) ->
   % TODO: Is it correct to ignore other types of U packets?
   State;
 
@@ -452,7 +456,7 @@ handle_packet(u, _Data, State)->
 %%% +--------------------------------------------------------------+
 
 handle_packet(s, ReceiveCounter, State) ->
-  confirm_sent_counter( ReceiveCounter, State );
+  confirm_sent_counter(ReceiveCounter, State);
 
 %%% +--------------------------------------------------------------+
 %%% |                     I-type packet handle                     |
@@ -464,7 +468,7 @@ handle_packet(i, Packet, #state{
   State1 = handle_packet(i, Packet, State#state{vw = 0}),
   % Sending an acknowledge because the number of
   % unacknowledged i-packets is reached its limit.
-  confirm_received_counter( State1 );
+  confirm_received_counter(State1);
 
 handle_packet(i, {SendCounter, ReceiveCounter, ASDU}, #state{
   vr = VR,
@@ -479,11 +483,11 @@ handle_packet(i, {SendCounter, ReceiveCounter, ASDU}, #state{
   % is overflowed we should reset its value.
   NewVR =
     case VR > ?MAX_COUNTER of
-      true  -> 0;
+      true -> 0;
       false -> VR + 1
     end,
 
-  confirm_sent_counter( ReceiveCounter, NewState#state{
+  confirm_sent_counter(ReceiveCounter, NewState#state{
     vr = NewVR,
     vw = VW - 1
   });
@@ -546,7 +550,7 @@ check_setting(host, Host) when is_tuple(Host) ->
     IP when length(IP) =:= 4 ->
       case [Octet || Octet <- IP, is_integer(Octet), Octet >= 0, Octet =< 255] of
         IP -> Host;
-        _  -> throw({invalid_setting, Host})
+        _ -> throw({invalid_setting, Host})
       end;
     _ -> throw({invalid_setting, Host})
   end;
@@ -572,7 +576,7 @@ check_setting(t3, Timeout)
 check_setting(connect_attempts, Attempts)
   when is_integer(Attempts) -> Attempts;
 
-check_setting(Key, Value)->
+check_setting(Key, Value) ->
   throw({invalid_setting, {setting, Key, value, Value}}).
 
 %% +--------------------------------------------------------------+
@@ -592,7 +596,7 @@ confirm_sent_counter(ReceiveCounter, #state{
   settings = #{t1 := T1}
 } = State) ->
   reset_timer(t1, PrevTimer),
-  Unconfirmed = [S || S <- Sent, (ReceiveCounter + (OverflowCount * (?MAX_COUNTER+1))) < S],
+  Unconfirmed = [S || S <- Sent, (ReceiveCounter + (OverflowCount * (?MAX_COUNTER + 1))) < S],
 
   % ATTENTION. According to the IEC 60870-5-104 we have to start timer from the point
   % of the first unconfirmed packet, but for the simplicity of implementation we start if
@@ -686,7 +690,7 @@ reset_timer(_Type, _Timer) ->
 %% Clearing the mailbox from timer messages
 clear_timer(Type) ->
   receive
-    {Self, Type} when Self =:= self() -> clear_timer( Type )
+    {Self, Type} when Self =:= self() -> clear_timer(Type)
   after
     0 -> ok
   end.

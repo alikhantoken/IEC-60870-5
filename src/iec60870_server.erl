@@ -166,21 +166,12 @@ update_value(#?MODULE{name = Name, storage = Storage}, ID, NewObject) ->
   OldObject =
     case ets:lookup(Storage, ID) of
       [{_, Map}] -> Map;
-      _ -> #{group => undefined}
+      _ -> #{}
     end,
-
-  MergedObject = merge_objects(OldObject, NewObject),
-  NewValue = check_value(MergedObject),
-
-  ets:insert(Storage, {ID, NewValue}),
-
-  esubscribe:notify(Name, update, {ID, NewValue}),
-  esubscribe:notify(Name, ID, NewValue).
-
-merge_objects(OldObject, #{ts := _} = NewObject) ->
-  maps:merge(OldObject, NewObject);
-merge_objects(OldObject, NewObject) ->
-  maps:merge(OldObject, NewObject#{ts => erlang:system_time(millisecond)}).
+  MergedObject = iec60870_lib:merge_objects(OldObject, NewObject),
+  ets:insert(Storage, {ID, MergedObject}),
+  esubscribe:notify(Name, update, {ID, MergedObject}),
+  esubscribe:notify(Name, ID, MergedObject).
 
 %% +--------------------------------------------------------------+
 %% |                       Internal functions                     |
@@ -302,16 +293,3 @@ check_setting(groups, undefined) ->
 
 check_setting(Key, _) ->
   throw({invalid_settings, Key}).
-
-%% The object data must contain a 'value' key
-check_value(#{value := Value} = ObjectData) when is_number(Value) ->
-  ObjectData;
-%% If an object's value is undefined, then we set its value
-%% to 0 and enable the quality bit for invalid values
-check_value(#{value := none} = ObjectData) ->
-  ObjectData#{value => 0};
-check_value(#{value := undefined} = ObjectData) ->
-  ObjectData#{value => 0};
-%% Key 'value' is missing, incorrect object passed
-check_value(_Value) ->
-  throw({error, value_parameter_missing}).

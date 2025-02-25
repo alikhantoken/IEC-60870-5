@@ -796,20 +796,11 @@ send_asdu(Connection, ASDU) ->
 update_value(Name, Storage, ID, NewObject) ->
   OldObject =
     case ets:lookup(Storage, ID) of
-      [{_, Map}] ->
-        Map;
-      _ -> #{
-        value => undefined,
-        group => undefined
-      }
+      [{_, Map}] -> Map;
+      _ -> #{}
     end,
-
-  MergedObject = maps:merge(OldObject, NewObject#{
-    accept_ts => erlang:system_time(millisecond)
-  }),
-
+  MergedObject = iec60870_lib:merge_objects(OldObject, NewObject),
   ets:insert(Storage, {ID, MergedObject}),
-
   esubscribe:notify(Name, update, {ID, MergedObject}),
   esubscribe:notify(Name, ID, MergedObject).
 

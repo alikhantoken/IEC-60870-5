@@ -99,7 +99,7 @@ write(#?MODULE{pid = PID}, IOA, InDataObject) when is_map(InDataObject) ->
     true ->
       case is_remote_command(InDataObject) of
         true ->
-          OutDataObject = check_value(InDataObject),
+          OutDataObject = iec60870_lib:check_value(InDataObject),
           %% This call returns 'ok' either {error, Reason}.
           case gen_statem:call(PID, {write, IOA, OutDataObject}) of
             ok ->
@@ -230,16 +230,3 @@ check_setting(Key, _) ->
 is_remote_command(#{type := Type})->
   (Type >= ?C_SC_NA_1 andalso Type =< ?C_BO_NA_1) orelse
     (Type >= ?C_SC_TA_1 andalso Type =< ?C_BO_TA_1).
-
-%% The object data must contain a 'value' key
-check_value(#{value := Value} = ObjectData) when is_number(Value) ->
-  ObjectData;
-%% If an object's value is undefined, then we set its value
-%% to 0 and enable the quality bit for invalid values
-check_value(#{value := none} = ObjectData) ->
-  ObjectData#{value => 0};
-check_value(#{value := undefined} = ObjectData) ->
-  ObjectData#{value => 0};
-%% Key 'value' is missing, incorrect object passed
-check_value(_Value) ->
-  throw({error, value_parameter_missing}).
