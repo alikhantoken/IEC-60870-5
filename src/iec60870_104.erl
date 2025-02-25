@@ -478,7 +478,7 @@ handle_packet(i, {SendCounter, ReceiveCounter, ASDU}, #state{
   % When control field of received packets
   % is overflowed we should reset its value.
   NewVR =
-    case VR >= ?MAX_COUNTER of
+    case VR > ?MAX_COUNTER of
       true  -> 0;
       false -> VR + 1
     end,
@@ -512,7 +512,7 @@ send_i_packet(ASDU, #state{
   %% When control field of sent packets
   %% is overflowed we should reset its value.
   NewVS = VS + 1,
-  UpdatedOverflowCount = NewVS div ?MAX_COUNTER,
+  UpdatedOverflowCount = NewVS div (?MAX_COUNTER + 1),
   State#state{
     vs = NewVS,
     vw = W,
@@ -592,7 +592,7 @@ confirm_sent_counter(ReceiveCounter, #state{
   settings = #{t1 := T1}
 } = State) ->
   reset_timer(t1, PrevTimer),
-  Unconfirmed = [S || S <- Sent, (ReceiveCounter + (OverflowCount * ?MAX_COUNTER)) < S],
+  Unconfirmed = [S || S <- Sent, (ReceiveCounter + (OverflowCount * (?MAX_COUNTER+1))) < S],
 
   % ATTENTION. According to the IEC 60870-5-104 we have to start timer from the point
   % of the first unconfirmed packet, but for the simplicity of implementation we start if
