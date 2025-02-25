@@ -15,9 +15,7 @@
 
 -export([
   parse_information_element/2,
-  create_information_element/2,
-  get_cp24/1,
-  parse_cp24/1
+  create_information_element/2
 ]).
 
 %%% +--------------------------------------------------------------+

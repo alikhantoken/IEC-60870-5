@@ -143,10 +143,10 @@ accept_connection(ListenSocket, #{port := Port} = Settings, Root) ->
     Socket = accept_loop(ListenSocket, Root),
     % Handle the ListenSocket to the next process
     accept_connection(ListenSocket, Settings, Root),
-    ?LOGDEBUG("server on port ~p: accepted an incoming connection, waiting for START ACTIVATE", [Port]),
+    ?LOGDEBUG("IEC104: server on port ~p: accepted an incoming connection, waiting for START ACTIVATE", [Port]),
     case wait_activate(Socket, ?START_DT_ACTIVATE, <<>>) of
       {ok, Buffer} ->
-        ?LOGDEBUG("server on port ~p: START ACTIVATE received, reply with START CONFIRM", [Port]),
+        ?LOGDEBUG("IEC104: server on port ~p: START ACTIVATE received, reply with START CONFIRM", [Port]),
         socket_send(Socket, create_u_packet(?START_DT_CONFIRM)),
         case iec60870_server:start_connection(Root, ListenSocket, self()) of
           {ok, Connection} ->
@@ -179,8 +179,14 @@ accept_loop(ListenSocket, Root) ->
   end.
 
 init_loop(#state{
-  settings = #{w := W}
+  settings = #{
+    host := Host,
+    port := Port,
+    w := W
+  },
+  buffer = Buffer
 } = StateIn) ->
+  ?LOGDEBUG("IEC104: initializing loop for ~p on port ~p, buffer: ~p", [Host, Port, Buffer]),
   StateOut = parse_packet(StateIn#state{
     vs = 0,
     vr = 0,
@@ -240,10 +246,10 @@ init_client(Attempts, Owner, #{
     {ok, Socket} ->
       % Sending the activation command and waiting for its confirmation
       socket_send(Socket, create_u_packet(?START_DT_ACTIVATE)),
-      ?LOGDEBUG("client ~p: sending START ACTIVATE", [Host]),
+      ?LOGDEBUG("IEC104: client ~p sending START ACTIVATE", [Host]),
       case wait_activate(Socket, ?START_DT_CONFIRM, <<>>) of
         {ok, Buffer} ->
-          ?LOGDEBUG("client ~p: START CONFIRM", [Host]),
+          ?LOGDEBUG("IEC104: client ~p START CONFIRM", [Host]),
           % The confirmation has been received and the client is ready to work
           Owner ! {ready, self()},
           init_loop(#state{
@@ -462,61 +468,59 @@ handle_packet(s, ReceiveCounter, State) ->
 %%% |                     I-type packet handle                     |
 %%% +--------------------------------------------------------------+
 
+%% Note: sending an acknowledge because the number of
+%%       unacknowledged i-packets is reached its limit.
 handle_packet(i, Packet, #state{
   vw = 1
 } = State) ->
   State1 = handle_packet(i, Packet, State#state{vw = 0}),
-  % Sending an acknowledge because the number of
-  % unacknowledged i-packets is reached its limit.
   confirm_received_counter(State1);
 
+%% Note: when control field of received packets
+%%       is overflowed we should reset its value.
 handle_packet(i, {SendCounter, ReceiveCounter, ASDU}, #state{
   vr = VR,
   vw = VW,
   connection = Connection
 } = State) when SendCounter =:= VR ->
-
   Connection ! {asdu, self(), ASDU},
-
   NewState = start_t2(State),
-  % When control field of received packets
-  % is overflowed we should reset its value.
   NewVR =
     case VR > ?MAX_COUNTER of
-      true -> 0;
-      false -> VR + 1
+      true ->
+        ?LOGDEBUG("IEC104: resetting received counter due to overflow, received counter: ~p", [VR]),
+        0;
+      false ->
+        VR + 1
     end,
-
   confirm_sent_counter(ReceiveCounter, NewState#state{
     vr = NewVR,
     vw = VW - 1
   });
 
-%% When the quantity of transmitted packets does not match
-%% the number of packets received by the client.
+%% Note: when the quantity of transmitted packets does not match
+%%       the number of packets received by the client.
 handle_packet(i, {SendCounter, _ReceiveCounter, _ASDU}, #state{vr = VR}) ->
   exit({invalid_receive_counter, SendCounter, VR}).
 
+%% Note: when control field of sent packets is overflowed we should reset its value.
 send_i_packet(ASDU, #state{
   settings = #{
-    w := W,
-    k := K
+    w := W
   },
   vs = VS,
   socket = Socket,
-  sent = Sent
+  sent = Sent,
+  overflows = Overflows
 } = State) ->
-  if
-    length(Sent) =< K ->
-      APDU = create_i_packet(ASDU, State),
-      socket_send(Socket, APDU);
-    true ->
-      exit({max_number_of_unconfirmed_packets_reached, K})
-  end,
-  %% When control field of sent packets
-  %% is overflowed we should reset its value.
+  APDU = create_i_packet(ASDU, State),
+  socket_send(Socket, APDU),
   NewVS = VS + 1,
   UpdatedOverflowCount = NewVS div (?MAX_COUNTER + 1),
+  case Overflows of
+    UpdatedOverflowCount -> ignore;
+    _ -> ?LOGDEBUG("IEC104: overflow count: ~p, sent counter: ~p", [UpdatedOverflowCount, NewVS])
+  end,
   State#state{
     vs = NewVS,
     vw = W,
@@ -598,6 +602,12 @@ confirm_sent_counter(ReceiveCounter, #state{
   reset_timer(t1, PrevTimer),
   Unconfirmed = [S || S <- Sent, (ReceiveCounter + (OverflowCount * (?MAX_COUNTER + 1))) < S],
 
+  ?LOGDEBUG("IEC104: confirmation of sent packets, overflow cnt: ~p, sent len: ~p, unconfirmed len: ~p", [
+    OverflowCount,
+    length(Sent),
+    length(Unconfirmed)
+  ]),
+
   % ATTENTION. According to the IEC 60870-5-104 we have to start timer from the point
   % of the first unconfirmed packet, but for the simplicity of implementation we start if
   % from the point of the last confirmation. This means that the actual time of waiting for
@@ -621,6 +631,7 @@ confirm_received_counter(#state{
     w := W
   }
 } = State) ->
+  ?LOGDEBUG("IEC104: confirmation of received packets, receive counter: ~p", [VR]),
   UpdatedVR = create_s_packet(VR),
   socket_send(Socket, UpdatedVR),
   reset_timer(t2, Timer),
