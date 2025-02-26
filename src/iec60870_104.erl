@@ -187,7 +187,7 @@ init_loop(#state{
   buffer = Buffer
 } = StateIn) ->
   ?LOGDEBUG("IEC104: initializing loop for ~p on port ~p, buffer: ~p", [Host, Port, Buffer]),
-  StateOut = parse_packet(StateIn#state{
+  StateOut = parse_data(<<>>, StateIn#state{
     vs = 0,
     vr = 0,
     vw = W,
@@ -203,7 +203,7 @@ loop(#state{
   receive
     % Data is received from the transport level (TCP)
     {tcp, Socket, Data} ->
-      NewState = parse_packet(Data, State),
+      NewState = parse_data(Data, State),
       loop(NewState);
 
     % A packet is received from the connection
@@ -321,7 +321,7 @@ handle_command(t3, #state{
 handle_command(InvalidCommand, _State) ->
   throw({invalid_command, InvalidCommand}).
 
-parse_packet(Data, #state{
+parse_data(Data, #state{
   buffer = Buffer
 } = StateIn) ->
   {Packets, TailBuffer} = split_into_packets(<<Buffer/binary, Data/binary>>),
