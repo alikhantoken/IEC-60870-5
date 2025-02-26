@@ -180,13 +180,12 @@ accept_loop(ListenSocket, Root) ->
 
 init_loop(#state{
   settings = #{
-    host := Host,
     port := Port,
     w := W
   },
   buffer = Buffer
 } = StateIn) ->
-  ?LOGDEBUG("IEC104: initializing loop for ~p on port ~p, buffer: ~p", [Host, Port, Buffer]),
+  ?LOGDEBUG("IEC104: initializing loop on port ~p, initial buffer: ~p", [Port, Buffer]),
   StateOut = parse_data(<<>>, StateIn#state{
     vs = 0,
     vr = 0,
