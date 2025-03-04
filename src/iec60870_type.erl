@@ -22,6 +22,7 @@
 %%% |                       Macros & Records                       |
 %%% +--------------------------------------------------------------+
 
+-define(MILLIS_IN_SECOND, 1000).
 -define(MILLIS_IN_MINUTE, 60000).
 -define(UNIX_EPOCH_DATE, {1970, 1, 1}).
 -define(UNIX_EPOCH_SECONDS, 62167219200).
@@ -578,7 +579,7 @@ parse_cp56(<<
       {{Year + ?CURRENT_MILLENNIUM, Month, Day}, {Hours, Minutes, millis_to_seconds(Millis)}},
     [UTC] = calendar:local_time_to_universal_time_dst(DateTime),
     GregorianSeconds = calendar:datetime_to_gregorian_seconds(UTC),
-    seconds_to_millis(GregorianSeconds - ?UNIX_EPOCH_SECONDS)
+    seconds_to_millis(GregorianSeconds - ?UNIX_EPOCH_SECONDS) + (Millis rem ?MILLIS_IN_SECOND)
   catch
     _:Error ->
       ?LOGERROR("CP56 parse error: ~p, timestamp: ~p", [Error, Timestamp]),
@@ -622,7 +623,8 @@ get_cp56(PosixTimestamp) when is_integer(PosixTimestamp) ->
     {{Year, Month, Day}, {Hour, Minute, Seconds}} =
       calendar:universal_time_to_local_time(UTC),
     WeekDay = calendar:day_of_the_week(Year, Month, Day),
-    <<(seconds_to_millis(Seconds)):16/little-integer,
+    Millis = seconds_to_millis(Seconds) + (PosixTimestamp rem ?MILLIS_IN_SECOND),
+    <<Millis:16/little-integer,
       16#00:2,
       Minute:6,
       16#00:3,
