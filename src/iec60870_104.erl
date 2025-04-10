@@ -114,8 +114,8 @@ start_server(InSettings) ->
       throw({transport_error, Reason})
   end.
 
-stop_server(ServerPort) ->
-  gen_tcp:close(ServerPort).
+stop_server(Socket) ->
+  gen_tcp:close(Socket).
 
 %%% +--------------------------------------------------------------+
 %%% |                    Client API implementation                 |
@@ -139,7 +139,9 @@ start_client(InSettings) ->
 
 %% Waiting for incoming connections (clients)
 accept_connection(ListenSocket, #{port := Port} = Settings, Root) ->
-  spawn(fun() ->
+  spawn(
+  fun() ->
+    erlang:monitor(process, Root),
     Socket = accept_loop(ListenSocket, Root),
     % Handle the ListenSocket to the next process
     accept_connection(ListenSocket, Settings, Root),
@@ -175,6 +177,8 @@ accept_loop(ListenSocket, Root) ->
     {error, Error} ->
       catch gen_tcp:close(ListenSocket),
       exit(Root, Error),
+      exit(Error);
+    {'DOWN', _, process, _, Error} ->
       exit(Error)
   end.
 
@@ -195,7 +199,10 @@ init_loop(#state{
   loop(StateOut).
 
 loop(#state{
-  settings = #{k := K},
+  settings = #{
+    port := Port,
+    k := K
+  },
   socket = Socket,
   sent = Sent
 } = State) ->
@@ -228,11 +235,14 @@ loop(#state{
       exit(Reason);
     {tcp_passive, Socket} ->
       exit(tcp_passive);
+    {'DOWN', _, process, _, Error} ->
+      ?LOGERROR("port ~p received down from root, reason: ~p", [Port, Error]),
+      exit({closed, Error});
 
     % If an ASDU packet isn't accepted because we are waiting for confirmation,
     % we should compare the sent packets with K to avoid ignoring other ASDUs
     Unexpected when length(Sent) =< K ->
-      ?LOGWARNING("unexpected message received ~p", [Unexpected]),
+      ?LOGWARNING("port ~p unexpected message received ~p", [Port, Unexpected]),
       loop(State)
   end.
 
@@ -286,7 +296,9 @@ wait_activate(Socket, Code, Buffer) ->
     {tcp_error, Socket, Reason} ->
       {error, Reason};
     {tcp_passive, Socket} ->
-      {error, tcp_passive}
+      {error, tcp_passive};
+    {'DOWN', _, process, _, Error} ->
+      {error, Error}
   after
     ?WAIT_ACTIVATE -> {error, timeout}
   end.

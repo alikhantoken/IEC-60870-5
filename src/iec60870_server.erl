@@ -217,6 +217,7 @@ init_server(Owner, #{
     asdu => iec60870_asdu:get_settings(maps:with(maps:keys(?DEFAULT_ASDU_SETTINGS), Settings))
   },
   Owner ! {ready, self(), Ref},
+  process_flag(trap_exit, true),
   await_connection(#state{
     module = Module,
     server = Server,
@@ -225,6 +226,7 @@ init_server(Owner, #{
   }).
 
 await_connection(#state{
+  module = Module,
   server = Server,
   connection_settings = ConnectionSettings
 } = State) ->
@@ -238,6 +240,9 @@ await_connection(#state{
           From ! {self(), error}
       end,
       await_connection(State);
+    {'EXIT', _PID, Reason} ->
+      catch Module:stop_server(Server),
+      exit(Reason);
     Unexpected ->
       ?LOGWARNING("unexpected mesaage ~p", [Unexpected]),
       await_connection(State)
