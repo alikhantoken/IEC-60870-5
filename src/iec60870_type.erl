@@ -558,7 +558,7 @@ parse_cp24(<<
 >>) ->
   Millis + (Minutes * ?MILLIS_IN_MINUTE);
 parse_cp24(InvalidTimestamp) ->
-  ?LOGWARNING("Invalid CP24 has been received: ~p", [InvalidTimestamp]),
+  ?LOGWARNING("received invalid CP24: ~p", [InvalidTimestamp]),
   throw({invalid_object_ts, InvalidTimestamp}).
 
 parse_cp56(<<
@@ -582,17 +582,17 @@ parse_cp56(<<
     seconds_to_millis(GregorianSeconds - ?UNIX_EPOCH_SECONDS) + (Millis rem ?MILLIS_IN_SECOND)
   catch
     _:Error ->
-      ?LOGERROR("CP56 parse error: ~p, timestamp: ~p", [Error, Timestamp]),
+      ?LOGERROR("failed to parse CP56, error: ~p, timestamp: ~p", [Error, Timestamp]),
       none
   end;
 parse_cp56(InvalidTimestamp) ->
-  ?LOGWARNING("Invalid CP56 has been received: ~p", [InvalidTimestamp]),
+  ?LOGWARNING("received invalid CP56: ~p", [InvalidTimestamp]),
   throw({invalid_object_ts, InvalidTimestamp}).
 
 get_cp16(Value) when is_integer(Value) ->
   Value;
 get_cp16(Anything) ->
-  ?LOGWARNING("CP16 received invalid timestamp: ~p", [Anything]),
+  ?LOGWARNING("received invalid CP16: ~p", [Anything]),
   get_cp16(0).
 
 get_cp24(TotalMillis) when is_integer(TotalMillis) ->
@@ -609,11 +609,11 @@ get_cp24(TotalMillis) when is_integer(TotalMillis) ->
     <<(round(Millis)):16/little-integer, 16#00:2, (round(Minutes)):6>>
   catch
     _:Error ->
-      ?LOGERROR("CP24 get error: ~p, timestamp: ~p", [Error, TotalMillis]),
+      ?LOGERROR("failed to build CP24, error: ~p, timestamp: ~p", [Error, TotalMillis]),
       undefined
   end;
 get_cp24(Anything) ->
-  ?LOGWARNING("CP24 received invalid timestamp: ~p", [Anything]),
+  ?LOGWARNING("received invalid CP24 timestamp: ~p", [Anything]),
   get_cp24(0).
 
 get_cp56(PosixTimestamp) when is_integer(PosixTimestamp) ->
@@ -637,11 +637,11 @@ get_cp56(PosixTimestamp) when is_integer(PosixTimestamp) ->
       (Year - ?CURRENT_MILLENNIUM):7>>
   catch
     _:Error ->
-      ?LOGERROR("CP56 get error: ~p, timestamp: ~p", [Error, PosixTimestamp]),
+      ?LOGERROR("failed to build CP56, error: ~p, timestamp: ~p", [Error, PosixTimestamp]),
       undefined
   end;
 get_cp56(Anything) ->
-  ?LOGWARNING("CP56 received invalid timestamp: ~p", [Anything]),
+  ?LOGWARNING("received invalid CP56 timestamp: ~p", [Anything]),
   get_cp56(erlang:system_time(millisecond)).
 
 millis_to_seconds(Millis) -> Millis div 1000.

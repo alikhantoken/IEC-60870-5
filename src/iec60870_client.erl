@@ -73,6 +73,7 @@ start(InSettings) ->
         storage = Storage
       };
     {'EXIT', PID, Reason} ->
+      ?LOGERROR("startup failed, reason: ~p", [Reason]),
       throw(Reason)
   end.
 
@@ -100,21 +101,20 @@ write(#?MODULE{pid = PID}, IOA, InDataObject) when is_map(InDataObject) ->
       case is_remote_command(InDataObject) of
         true ->
           OutDataObject = iec60870_lib:check_value(InDataObject),
-          %% This call returns 'ok' either {error, Reason}.
           case gen_statem:call(PID, {write, IOA, OutDataObject}) of
             ok ->
               ok;
-            {error, Reason} ->
-              ?LOGERROR("write operation call failed with reason: ~p", [Reason]),
-              throw(Reason)
+            {error, Error} ->
+              ?LOGERROR("write operation failed, error: ~p", [Error]),
+              throw(Error)
           end;
         false ->
           PID ! {write, IOA, InDataObject},
           ok
       end;
     false ->
-      ?LOGERROR("write operation called on no longer alive connection"),
-      throw(connection_closed)
+      ?LOGERROR("write operation attempted on a closed connection"),
+      throw(client_connection_unavailable)
   end;
 write(_, _, _) ->
   throw(bad_arg).

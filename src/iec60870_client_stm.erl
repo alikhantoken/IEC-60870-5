@@ -132,6 +132,7 @@ init({Owner, #{
       {ok, PID} -> PID;
       {error, Reason} -> exit(Reason)
     end,
+  ?LOGINFO("~p of type ~p starting...", [Name, Type]),
   {ok, #connecting{next_state = ?GI_INITIALIZATION, failed = []}, #data{
     type = Type,
     current_connection = main,
@@ -147,22 +148,23 @@ init({Owner, #{
 %%% +--------------------------------------------------------------+
 %%% |           Handling connection failure                        |
 %%% +--------------------------------------------------------------+
+
 handle_event(
   info,
   {'EXIT', Connection, Reason},
   CurrentState,
   #data{name = Name, connection = Connection, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGERROR("client ~p connection ~p: received EXIT from connection, reason: ~p", [
-    Name, CurrentConnection, Reason
+  ?LOGERROR("~p connection ~p received EXIT from connection, reason: ~p", [
+    Name,
+    CurrentConnection,
+    Reason
   ]),
-
-  ?LOGINFO("client ~p connection ~p try to recover connection",[Name, CurrentConnection]),
-
+  ?LOGINFO("~p connection ~p trying to restart connection",[Name, CurrentConnection]),
   {next_state, #connecting{next_state = CurrentState, error = Reason, failed = []}, Data};
 
 %%% +--------------------------------------------------------------+
-%%% |           Handling incoming ASDU packets                     |
+%%% |                Handling incoming ASDU packets                |
 %%% +--------------------------------------------------------------+
 
 handle_event(
@@ -178,7 +180,7 @@ handle_event(
     _:{invalid_object, _Value} = Error ->
       {stop, Error, Data};
     _:Error ->
-      ?LOGERROR("client ~p connection ~p: invalid ASDU received: ~p, error: ~p", [Name, CurrentConnection, ASDU, Error]),
+      ?LOGERROR("~p connection ~p received invalid asdu: ~p, error: ~p", [Name, CurrentConnection, ASDU, Error]),
       keep_state_and_data
   end;
 
@@ -192,7 +194,7 @@ handle_event(
   #connecting{},
   #data{name = Name, current_connection = CurrentConnection} = _Data
 ) ->
-  ?LOGDEBUG("client ~p connection ~p: entering CONNECTING state", [Name, CurrentConnection]),
+  ?LOGDEBUG("~p connection ~p entering state - connecting", [Name, CurrentConnection]),
   {keep_state_and_data, [{state_timeout, 0, connect}]};
 
 handle_event(
@@ -201,7 +203,7 @@ handle_event(
   #connecting{failed = Failed, error = Error},
   #data{connections = Connections, name = Name} = Data
 ) when length(Failed) =:= map_size(Connections) ->
-  ?LOGERROR("client ~p failed to start all connections w/ reason: ~p", [Name, Error]),
+  ?LOGERROR("~p failed to start all connections, error: ~p", [Name, Error]),
   {stop, Error, Data};
 
 handle_event(
@@ -213,14 +215,14 @@ handle_event(
   Module = iec60870_lib:get_driver_module(Type),
   try
     Connection = Module:start_client(maps:get(CurrentConnection, Connections)),
-    ?LOGINFO("client ~p started ~p connection", [Name, CurrentConnection]),
+    ?LOGINFO("~p successfully started ~p connection", [Name, CurrentConnection]),
     {next_state, NextState, Data#data{connection = Connection}}
   catch
-    _Exception:Reason ->
-      ?LOGWARNING("client ~p failed to start ~p connection w/ reason: ~p", [Name, CurrentConnection, Reason]),
+    _Exception:Error ->
+      ?LOGWARNING("~p failed to start ~p connection, error: ~p", [Name, CurrentConnection, Error]),
       {next_state, Connecting#connecting{
         failed = [CurrentConnection | Failed],
-        error = Reason
+        error = Error
       }, Data#data{
         current_connection = switch_connection(CurrentConnection)
       }}
@@ -236,7 +238,7 @@ handle_event(
   ?GI_INITIALIZATION,
   #data{name = Name, current_connection = CurrentConnection} = _Data
 ) ->
-  ?LOGDEBUG("client ~p connection ~p: entering INIT GROUPS state", [Name, CurrentConnection]),
+  ?LOGDEBUG("~p connection ~p entering state - groups initialization", [Name, CurrentConnection]),
   {keep_state_and_data, [{state_timeout, 0, init}]};
 
 handle_event(
@@ -269,7 +271,7 @@ handle_event(
   #gi{state = confirm, id = ID},
   #data{name = Name, asdu = ASDUSettings, connection = Connection, current_connection = CurrentConnection}
 ) ->
-  ?LOGDEBUG("client ~p connection ~p: sending GI REQUEST for group ~p", [Name, CurrentConnection, ID]),
+  ?LOGDEBUG("~p connection ~p sending general interrogation to group: ~p", [Name, CurrentConnection, ID]),
   [GroupRequest] = iec60870_asdu:build(#asdu{
     type = ?C_IC_NA_1,
     pn = ?POSITIVE_PN,
@@ -286,7 +288,11 @@ handle_event(
   #gi{state = confirm, id = ID} = State,
   #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGDEBUG("client ~p connection ~p: GI CONFIRMATION for group ~p", [Name, CurrentConnection, ID]),
+  ?LOGDEBUG("~p connection ~p general interrogation confirmation, group: ~p", [
+    Name,
+    CurrentConnection,
+    ID
+  ]),
   {next_state, State#gi{state = run}, Data};
 
 %% GI Reject
@@ -296,7 +302,11 @@ handle_event(
   #gi{state = confirm, id = ID} = State,
   #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGWARNING("client ~p connection ~p: group ~p interrogation rejected", [Name, CurrentConnection, ID]),
+  ?LOGWARNING("~p connection ~p general interrogation rejected, group: ~p", [
+    Name,
+    CurrentConnection,
+    ID
+  ]),
   {next_state, State#gi{state = error}, Data};
 
 handle_event(
@@ -305,7 +315,11 @@ handle_event(
   #gi{state = confirm, id = ID} = State,
   #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGWARNING("client ~p connection ~p: group ~p interrogation confirmation timeout", [Name, CurrentConnection, ID]),
+  ?LOGWARNING("~p connection ~p general interrogation confirmation timeout, group: ~p", [
+    Name,
+    CurrentConnection,
+    ID
+  ]),
   {next_state, State#gi{state = error}, Data};
 
 %% GI Running
@@ -315,7 +329,11 @@ handle_event(
   #gi{state = run, timeout = Timeout, id = ID},
   #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGDEBUG("client ~p connection ~p: GI RUN state for group ~p", [Name, CurrentConnection, ID]),
+  ?LOGDEBUG("~p connection ~p entering state - general interrogation run, group: ~p", [
+    Name,
+    CurrentConnection,
+    ID
+  ]),
   {keep_state, Data#data{state_acc = #{}}, [{state_timeout, Timeout, timeout}]};
 
 %% Update received
@@ -325,7 +343,12 @@ handle_event(
   #gi{state = run, id = ID},
   #data{name = Name, storage = Storage, state_acc = GroupItems0, current_connection = CurrentConnection} = Data
 ) when (COT - ?COT_GROUP_MIN) =:= ID ->
-  ?LOGDEBUG("client ~p connection ~p: GI UPDATE for group: ~p, ASDU: ~p", [Name, CurrentConnection, ID, ASDU]),
+  ?LOGDEBUG("~p connection ~p received general interrogation update, group: ~p, asdu: ~p", [
+    Name,
+    CurrentConnection,
+    ID,
+    ASDU
+  ]),
   GroupItems =
     lists:foldl(
       fun({IOA, Value}, AccIn) ->
@@ -341,7 +364,11 @@ handle_event(
   #gi{state = run, id = ID, count = Count} = State,
   #data{name = Name, state_acc = GroupItems, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGDEBUG("client ~p connection ~p: GI TERMINATION for group ~p", [Name, CurrentConnection, ID]),
+  ?LOGDEBUG("~p connection ~p general interrogation positive termination, group: ~p", [
+    Name,
+    CurrentConnection,
+    ID
+  ]),
   IsSuccessful =
     if
       is_number(Count) -> map_size(GroupItems) >= Count;
@@ -359,8 +386,9 @@ handle_event(
   internal,
   #asdu{type = ?C_IC_NA_1, cot = ?COT_ACTTERM, pn = ?NEGATIVE_PN, objects = [{_IOA, ID}]},
   #gi{state = run, id = ID} = State,
-  Data
+  #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
+  ?LOGDEBUG("~p connection ~p general interrogation negative termination, group: ~p", [Name, CurrentConnection, ID]),
   {next_state, State#gi{state = error}, Data};
 
 handle_event(
@@ -384,7 +412,7 @@ handle_event(
   #gi{state = error, id = ID},
   #data{name = Name, current_connection = CurrentConnection} = _Data
 ) ->
-  ?LOGDEBUG("client ~p connection ~p: GI TIMEOUT for group ~p", [Name, CurrentConnection, ID]),
+  ?LOGDEBUG("~p connection ~p entering state - general interrogation timeout, group: ~p", [Name, CurrentConnection, ID]),
   {keep_state_and_data, [{state_timeout, 0, timeout}]};
 
 handle_event(
@@ -394,7 +422,12 @@ handle_event(
   #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
   RestAttempts = Attempts - 1,
-  ?LOGDEBUG("client ~p connection ~p: GI attempts left ~p for group ~p", [Name, CurrentConnection, RestAttempts, ID]),
+  ?LOGDEBUG("~p connection ~p general interrogation timeout, group: ~p, remaining attempts: ~p", [
+    Name,
+    CurrentConnection,
+    ID,
+    RestAttempts
+  ]),
   if
     RestAttempts > 0 ->
       {next_state, State#gi{state = confirm, attempts = RestAttempts}, Data};
@@ -411,7 +444,7 @@ handle_event(
   #gi{state = finish, id = ID},
   #data{name = Name, current_connection = CurrentConnection}
 ) ->
-  ?LOGDEBUG("client ~p connection ~p: GI FINISH for group ~p", [Name, CurrentConnection, ID]),
+  ?LOGDEBUG("~p connection ~p entering state - general interrogation finish, group: ~p", [Name, CurrentConnection, ID]),
   {keep_state_and_data, [{state_timeout, 0, timeout}]};
 
 handle_event(
@@ -450,7 +483,7 @@ handle_event(
   ?CONNECTED,
   #data{name = Name, current_connection = CurrentConnection} = _Data
 ) ->
-  ?LOGDEBUG("client ~p connection ~p: entering CONNECTED state", [Name, CurrentConnection]),
+  ?LOGDEBUG("~p connection ~p entering state - connected", [Name, CurrentConnection]),
   keep_state_and_data;
 
 handle_event(
@@ -459,7 +492,6 @@ handle_event(
   ?CONNECTED,
   #data{name = Name, connection = Connection, asdu = ASDUSettings, storage = Storage}
 ) ->
-  % Getting all updates
   NextItems = [Object || {Object, _Node, A} <- esubscribe:lookup(Name, update), A =/= self()],
   MergedObject = {IOA, merge_existing_io(IOA, Value, Storage)},
   send_items([MergedObject | NextItems], Connection, ?COT_SPONT, ASDUSettings),
@@ -496,7 +528,6 @@ handle_event(
 %%% |                Sending remote control command                |
 %%% +--------------------------------------------------------------+
 
-%% Sending remote control command
 handle_event(
   enter,
   _PrevState,
@@ -510,32 +541,37 @@ handle_event(
     objects = [{IOA, Value}]
   }, ASDUSettings),
   send_asdu(Connection, ASDU),
-  ?LOGINFO("client ~p connection ~p: sent RC command activation! IOA: ~p, Type: ~p, Data object: ~p", [
-    Name, Connection, IOA, Type, Value
+  ?LOGINFO("~p connection ~p sent remote control activation, ioa: ~p, type: ~p, data object: ~p", [
+    Name,
+    Connection,
+    IOA,
+    Type,
+    Value
   ]),
   {keep_state_and_data, [{state_timeout, ?CONFIRM_TIMEOUT, timeout}]};
 
-%% Remote control command confirmation
 handle_event(
   internal,
   #asdu{type = Type, cot = ?COT_ACTCON, pn = ?POSITIVE_PN, objects = [{IOA, _}]},
   #rc{state = confirm, ioa = IOA, type = Type} = State,
   #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGINFO("client ~p connection ~p: RC command confirmation! IOA: ~p, Type: ~p", [
+  ?LOGINFO("~p connection ~p remote control confirmation, ioa: ~p, type: ~p", [
     CurrentConnection, Name, IOA, Type
   ]),
   {next_state, State#rc{state = run}, Data};
 
-%% Remote control command rejected
 handle_event(
   internal,
   #asdu{type = Type, cot = ?COT_ACTCON, pn = ?NEGATIVE_PN, objects = [{IOA, _}]},
   #rc{state = confirm, ioa = IOA, type = Type, from = From},
   #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGWARNING("client ~p connection ~p: RC command rejected! IOA: ~p, Type: ~p", [
-    Name, CurrentConnection, IOA, Type
+  ?LOGWARNING("~p connection ~p remote control rejected, ioa: ~p, type: ~p", [
+    Name,
+    CurrentConnection,
+    IOA,
+    Type
   ]),
   {next_state, ?CONNECTED, Data, [{reply, From, {error, reject}}]};
 
@@ -545,8 +581,11 @@ handle_event(
   #rc{state = confirm, ioa = IOA, type = Type, from = From},
   #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGWARNING("client ~p connection ~p: RC command confirmation timeout! IOA: ~p, Type: ~p", [
-    Name, CurrentConnection, IOA, Type
+  ?LOGWARNING("~p connection ~p remote control confirmation timeout, ioa: ~p, type: ~p", [
+    Name,
+    CurrentConnection,
+    IOA,
+    Type
   ]),
   {next_state, ?CONNECTED, Data, [{reply, From, {error, confirm_timeout}}]};
 
@@ -566,8 +605,11 @@ handle_event(
   #rc{state = run, ioa = IOA, type = Type, from = From},
   #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGINFO("client ~p connection ~p: RC command positive termination! IOA: ~p, Type: ~p", [
-    Name, CurrentConnection, IOA, Type
+  ?LOGINFO("~p connection ~p remote control positive termination, ioa: ~p, type: ~p", [
+    Name,
+    CurrentConnection,
+    IOA,
+    Type
   ]),
   {next_state, ?CONNECTED, Data, [{reply, From, ok}]};
 
@@ -578,8 +620,11 @@ handle_event(
   #rc{state = run, ioa = IOA, type = Type, from = From},
   #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGWARNING("client ~p connection ~p: RC command negative termination! IOA: ~p, Type: ~p", [
-    Name, CurrentConnection, IOA, Type
+  ?LOGWARNING("~p connection ~p remote control negative termination, ioa: ~p, type: ~p", [
+    Name,
+    CurrentConnection,
+    IOA,
+    Type
   ]),
   {next_state, ?CONNECTED, Data, [{reply, From, {error, not_executed}}]};
 
@@ -589,8 +634,11 @@ handle_event(
   #rc{state = run, ioa = IOA, type = Type, from = From},
   #data{name = Name, current_connection = CurrentConnection} = Data
 ) ->
-  ?LOGWARNING("client ~p connection ~p: RC command termination timeout! IOA: ~p, Type: ~p", [
-    Name, CurrentConnection, IOA, Type
+  ?LOGWARNING("~p connection ~p remote control termination timeout, ioa: ~p, type: ~p", [
+    Name,
+    CurrentConnection,
+    IOA,
+    Type
   ]),
   {next_state, ?CONNECTED, Data, [{reply, From, {error, execute_timeout}}]};
 
@@ -604,9 +652,13 @@ handle_event(
   _AnyState,
   #data{name = Name, storage = Storage, current_connection = CurrentConnection}
 ) when (Type >= ?M_SP_NA_1 andalso Type =< ?M_ME_ND_1)
-  orelse (Type >= ?M_SP_TB_1 andalso Type =< ?M_EP_TD_1)
-  orelse (Type =:= ?M_EI_NA_1) ->
-  ?LOGDEBUG("client ~p connection ~p: normal ASDU update: ~p", [Name, CurrentConnection, ASDU]),
+    orelse (Type >= ?M_SP_TB_1 andalso Type =< ?M_EP_TD_1)
+    orelse (Type =:= ?M_EI_NA_1) ->
+  ?LOGDEBUG("~p connection ~p received standard asdu: ~p", [
+    Name,
+    CurrentConnection,
+    ASDU
+  ]),
   Group =
     if
       COT >= ?COT_GROUP_MIN, COT =< ?COT_GROUP_MAX ->
@@ -648,7 +700,7 @@ handle_event(
   _AnyState,
   #data{name = Name, current_connection = CurrentConnection}
 ) ->
-  ?LOGINFO("client ~p connection ~p: termination of the group interrogation by ID: ~p, PN: ~p", [
+  ?LOGINFO("~p connection ~p group interrogation termination, group: ~p, pn: ~p", [
     Name,
     CurrentConnection,
     ID,
@@ -662,7 +714,7 @@ handle_event(
   State,
   #data{name = Name, current_connection = CurrentConnection}
 ) ->
-  ?LOGWARNING("client ~p connection ~p: unexpected ASDU type: ~p, state: ~p", [
+  ?LOGWARNING("~p connection ~p unexpected asdu type: ~p, state: ~p", [
     Name,
     CurrentConnection,
     Unexpected,
@@ -708,7 +760,11 @@ handle_event(
   _AnyState,
   #data{name = Name, current_connection = CurrentConnection, connection = Connection}
 ) ->
-  ?LOGERROR("client ~p connection ~p: failed to send packet, error: ~p", [Name, CurrentConnection, Error]),
+  ?LOGERROR("~p connection ~p failed to send packet, error: ~p", [
+    Name,
+    CurrentConnection,
+    Error
+  ]),
   keep_state_and_data;
 
 handle_event(
@@ -717,8 +773,11 @@ handle_event(
   _AnyState,
   #data{name = Name, current_connection = CurrentConnection}
 ) ->
-  ?LOGERROR("client ~p connection ~p: received EXIT from PID: ~p, reason: ~p", [
-    Name, CurrentConnection, PID, Reason
+  ?LOGERROR("~p connection ~p received EXIT from PID: ~p, reason: ~p", [
+    Name,
+    CurrentConnection,
+    PID,
+    Reason
   ]),
   {stop, Reason};
 
@@ -728,8 +787,11 @@ handle_event(
   _AnyState,
   #data{name = Name, current_connection = CurrentConnection}
 ) ->
-  ?LOGERROR("client ~p connection ~p: received unexpected event type: ~p, content ~p", [
-    Name, CurrentConnection, EventType, EventContent
+  ?LOGERROR("~p connection ~p received unexpected event: ~p, content ~p", [
+    Name,
+    CurrentConnection,
+    EventType,
+    EventContent
   ]),
   keep_state_and_data.
 
@@ -741,7 +803,11 @@ terminate(Reason, _, #data{
 }) ->
   catch exit(Connection, shutdown),
   catch exit(Esubscribe, shutdown),
-  ?LOGERROR("client ~p connection ~p: termination with reason: ~p", [Name, CurrentConnection, Reason]),
+  ?LOGERROR("~p connection ~p termination, reason: ~p", [
+    Name,
+    CurrentConnection,
+    Reason
+  ]),
   ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -759,7 +825,6 @@ merge_existing_io(IOA, NewObject, Storage) ->
       maps:without([accept_ts, group], NewObject)
   end.
 
-%% Sending data objects
 send_items(Items, Connection, COT, ASDUSettings) ->
   TypedItems = group_by_types(Items),
   [begin
@@ -788,7 +853,7 @@ send_asdu(Connection, ASDU) ->
     {confirm, Ref} ->
       ok;
     {'EXIT', Connection, Reason} = ExitMessage ->
-      ?LOGWARNING("connection ~p is down w/ reason: ~p", [Connection, Reason]),
+      ?LOGWARNING("received EXIT from connection: ~p, reason: ~p", [Connection, Reason]),
       self() ! ExitMessage,
       ok
   end.

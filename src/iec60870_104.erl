@@ -68,6 +68,7 @@
 -define(RESTART_WAIT, 1000).
 
 -record(state, {
+  type,
   socket,
   connection,
   settings,
@@ -99,19 +100,19 @@ start_server(InSettings) ->
       ListenSocket;
     {error, eaddrinuse} ->
       timer:sleep(?RESTART_WAIT),
-      ?LOGWARNING("~p port is in use, trying to reuse", [Port]),
-      ?LOGWARNING("ENSURE OTHER APPLICATIONS DO NOT USE PORT ~p, THIS MAY LEAD TO CONFLICTS", [Port]),
-      ?LOGWARNING("trying to open port ~p in shared mode", [Port]),
+      ?LOGWARNING("port ~p is already in use - attempting to reuse", [Port]),
+      ?LOGWARNING("potential conflict: ensure no other applications are using that port"),
+      ?LOGWARNING("attempting to open port ~p in shared mode", [Port]),
       case gen_tcp:listen(Port, [{reuseaddr, true} | SocketParams]) of
         {ok, ListenSocket} ->
-          ?LOGWARNING("port ~p opened in shared mode", [Port]),
+          ?LOGWARNING("port ~p is opened in shared mode", [Port]),
           accept_connection(ListenSocket, Settings, Root),
           ListenSocket;
         {error, Reason} ->
-          throw({transport_error, Reason})
+          throw({server_listener_start_failure, Reason})
       end;
     {error, Reason} ->
-      throw({transport_error, Reason})
+      throw({server_listener_start_failure, Reason})
   end.
 
 stop_server(Socket) ->
@@ -140,35 +141,36 @@ start_client(InSettings) ->
 %% Waiting for incoming connections (clients)
 accept_connection(ListenSocket, #{port := Port} = Settings, Root) ->
   spawn(
-  fun() ->
-    erlang:monitor(process, Root),
-    Socket = accept_loop(ListenSocket, Root),
-    % Handle the ListenSocket to the next process
-    accept_connection(ListenSocket, Settings, Root),
-    ?LOGDEBUG("IEC104: server on port ~p: accepted an incoming connection, waiting for START ACTIVATE", [Port]),
-    case wait_activate(Socket, ?START_DT_ACTIVATE, <<>>) of
-      {ok, Buffer} ->
-        ?LOGDEBUG("IEC104: server on port ~p: START ACTIVATE received, reply with START CONFIRM", [Port]),
-        socket_send(Socket, create_u_packet(?START_DT_CONFIRM)),
-        case iec60870_server:start_connection(Root, ListenSocket, self()) of
-          {ok, Connection} ->
-            init_loop(#state{
-              socket = Socket,
-              connection = Connection,
-              settings = Settings,
-              buffer = Buffer
-            });
-          error ->
-            ?LOGERROR("unable to start a process to handle the incoming connection with internal error"),
-            gen_tcp:close(Socket),
-            exit(start_connection_error)
-        end;
-      {error, ActivateError} ->
-        ?LOGWARNING("error activating incoming connection: ~p", [ActivateError]),
-        gen_tcp:close(Socket),
-        exit(ActivateError)
-    end
-        end).
+    fun() ->
+      ?LOGINFO("server on port ~p starting acceptor ~p", [Port, self()]),
+      erlang:monitor(process, Root),
+      Socket = accept_loop(ListenSocket, Root),
+      accept_connection(ListenSocket, Settings, Root),
+      ?LOGINFO("server on port ~p accepted incoming connection, waiting [START ACTIVATE]", [Port]),
+      case wait_activate(Socket, ?START_DT_ACTIVATE, <<>>) of
+        {ok, Buffer} ->
+          ?LOGINFO("server on port ~p received [START ACTIVATE], sending [START CONFIRM]", [Port]),
+          socket_send(Socket, create_u_packet(?START_DT_CONFIRM)),
+          case iec60870_server:start_connection(Root, ListenSocket, self()) of
+            {ok, Connection} ->
+              init_loop(#state{
+                socket = Socket,
+                connection = Connection,
+                settings = Settings,
+                buffer = Buffer,
+                type = server
+              });
+            error ->
+              ?LOGERROR("server port ~p failed to spawn process for incoming connection - internal error", [Port]),
+              gen_tcp:close(Socket),
+              exit(server_connection_accept_failure)
+          end;
+        {error, ActivationError} ->
+          ?LOGWARNING("server port ~p failed to activate incoming connection: ~p", [Port, ActivationError]),
+          gen_tcp:close(Socket),
+          exit({server_connection_activation_failure, {error, ActivationError}, {port, Port}})
+      end
+    end).
 
 accept_loop(ListenSocket, Root) ->
   case gen_tcp:accept(ListenSocket) of
@@ -187,9 +189,10 @@ init_loop(#state{
     port := Port,
     w := W
   },
-  buffer = Buffer
+  buffer = Buffer,
+  type = Type
 } = StateIn) ->
-  ?LOGDEBUG("IEC104: initializing loop on port ~p, initial buffer: ~p", [Port, Buffer]),
+  ?LOGDEBUG("initializing ~p on port ~p, initial buffer: ~p", [Type, Port, Buffer]),
   StateOut = parse_data(<<>>, StateIn#state{
     vs = 0,
     vr = 0,
@@ -203,6 +206,7 @@ loop(#state{
     port := Port,
     k := K
   },
+  type = Type,
   socket = Socket,
   sent = Sent
 } = State) ->
@@ -236,13 +240,13 @@ loop(#state{
     {tcp_passive, Socket} ->
       exit(tcp_passive);
     {'DOWN', _, process, _, Error} ->
-      ?LOGERROR("port ~p received down from root, reason: ~p", [Port, Error]),
+      ?LOGERROR("~p on port ~p received DOWN from root, error: ~p", [Type, Port, Error]),
       exit({closed, Error});
 
     % If an ASDU packet isn't accepted because we are waiting for confirmation,
     % we should compare the sent packets with K to avoid ignoring other ASDUs
     Unexpected when length(Sent) =< K ->
-      ?LOGWARNING("port ~p unexpected message received ~p", [Port, Unexpected]),
+      ?LOGWARNING("~p on port ~p received unexpected message: ~p", [Type, Port, Unexpected]),
       loop(State)
   end.
 
@@ -253,33 +257,34 @@ init_client(Attempts, Owner, #{
 } = Settings) when Attempts > 0 ->
   case gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}], ?CONNECT_TIMEOUT) of
     {ok, Socket} ->
-      % Sending the activation command and waiting for its confirmation
       socket_send(Socket, create_u_packet(?START_DT_ACTIVATE)),
-      ?LOGDEBUG("IEC104: client ~p sending START ACTIVATE", [Host]),
+      ?LOGDEBUG("~p:~p sending [START ACTIVATE]", [Host, Port]),
       case wait_activate(Socket, ?START_DT_CONFIRM, <<>>) of
         {ok, Buffer} ->
-          ?LOGDEBUG("IEC104: client ~p START CONFIRM", [Host]),
-          % The confirmation has been received and the client is ready to work
+          ?LOGDEBUG("~p:~p received [START CONFIRM]", [Host, Port]),
           Owner ! {ready, self()},
           init_loop(#state{
             socket = Socket,
             connection = Owner,
             settings = Settings,
-            buffer = Buffer
+            buffer = Buffer,
+            type = client
           });
         {error, ActivateError} ->
-          ?LOGWARNING("client connection activation error: ~p", [ActivateError]),
+          ?LOGWARNING("failed to [START ACTIVATE], error: ~p", [ActivateError]),
           gen_tcp:close(Socket),
           init_client(Attempts - 1, Owner, Settings)
       end;
     {error, ConnectError} ->
-      ?LOGWARNING("client open socket error: ~p", [ConnectError]),
+      ?LOGWARNING("failed to [CONNECT], error: ~p", [ConnectError]),
       init_client(Attempts - 1, Owner, Settings)
   end;
-init_client(_Attempts, _Owner, _Settings) ->
-  exit(connect_error).
+init_client(_Attempts, _Owner, #{
+  host := Host,
+  port := Port
+}) ->
+  exit({client_connect_failure, {host, Host}, {port, Port}}).
 
-%% Connection activation wait
 wait_activate(Socket, Code, Buffer) ->
   receive
     {tcp, Socket, Data} ->
@@ -304,8 +309,12 @@ wait_activate(Socket, Code, Buffer) ->
   end.
 
 %% T1 - APDU timeout
-handle_command(t1, _State) ->
-  exit(confirm_timeout);
+handle_command(t1, #state{
+  settings = #{port := Port},
+  type = Type
+}) ->
+  ?LOGERROR("~p on port ~p packets confirmation timeout!", [Type, Port]),
+  exit(confirmation_timeout);
 
 %% T2 - Acknowledge timeout
 handle_command(t2, State) ->
@@ -325,8 +334,11 @@ handle_command(t3, #state{
   State#state{t3 = {confirm, Timer}};
 
 handle_command(t3, #state{
-  t3 = {confirm, _Timer}
+  t3 = {confirm, _Timer},
+  settings = #{port := Port},
+  type = Type
 }) ->
+  ?LOGERROR("~p on port ~p heartbeat timeout!", [Type, Port]),
   exit(heartbeat_timeout);
 
 handle_command(InvalidCommand, _State) ->
@@ -448,8 +460,11 @@ create_i_packet(ASDU, #state{
 %%% |                     U-type packet handle                     |
 %%% +--------------------------------------------------------------+
 
-handle_packet(u, ?START_DT_CONFIRM, State) ->
-  ?LOGWARNING("unexpected START_DT_CONFIRM packet was received!"),
+handle_packet(u, ?START_DT_CONFIRM, #state{
+  settings = #{port := Port},
+  type = Type
+} = State) ->
+  ?LOGWARNING("~p on port ~p received unexpected [START CONFIRM] packet", [Type, Port]),
   State;
 
 handle_packet(u, ?TEST_FRAME_ACTIVATE, #state{
@@ -492,14 +507,16 @@ handle_packet(i, Packet, #state{
 handle_packet(i, {SendCounter, ReceiveCounter, ASDU}, #state{
   vr = VR,
   vw = VW,
-  connection = Connection
+  connection = Connection,
+  settings = #{port := Port},
+  type = Type
 } = State) when SendCounter =:= VR ->
   Connection ! {asdu, self(), ASDU},
   NewState = start_t2(State),
   NewVR =
     case VR > ?MAX_COUNTER of
       true ->
-        ?LOGDEBUG("IEC104: resetting received counter due to overflow, received counter: ~p", [VR]),
+        ?LOGDEBUG("~p on port ~p resetting receive counter due to overflow, counter: ~p", [Type, Port, VR]),
         0;
       false ->
         VR + 1
@@ -530,7 +547,7 @@ send_i_packet(ASDU, #state{
   UpdatedOverflowCount = NewVS div (?MAX_COUNTER + 1),
   case Overflows of
     UpdatedOverflowCount -> ignore;
-    _ -> ?LOGDEBUG("IEC104: overflow count: ~p, sent counter: ~p", [UpdatedOverflowCount, NewVS])
+    _ -> ?LOGDEBUG("overflow count: ~p, sent counter: ~p", [UpdatedOverflowCount, NewVS])
   end,
   State#state{
     vs = NewVS,
@@ -608,12 +625,15 @@ confirm_sent_counter(ReceiveCounter, #state{
   sent = Sent,
   t1 = PrevTimer,
   overflows = OverflowCount,
-  settings = #{t1 := T1}
+  settings = #{t1 := T1, port := Port},
+  type = Type
 } = State) ->
   reset_timer(t1, PrevTimer),
   Unconfirmed = [S || S <- Sent, (ReceiveCounter + (OverflowCount * (?MAX_COUNTER + 1))) < S],
 
-  ?LOGDEBUG("IEC104: confirmation of sent packets, overflow cnt: ~p, sent len: ~p, unconfirmed len: ~p", [
+  ?LOGDEBUG("~p on port ~p confirmation of sent packets, overflow count: ~p, sent length: ~p, unconfirmed length: ~p", [
+    Type,
+    Port,
     OverflowCount,
     length(Sent),
     length(Unconfirmed)
@@ -638,11 +658,13 @@ confirm_received_counter(#state{
   t2 = Timer,
   socket = Socket,
   vr = VR,
+  type = Type,
   settings = #{
-    w := W
+    w := W,
+    port := Port
   }
 } = State) ->
-  ?LOGDEBUG("IEC104: confirmation of received packets, receive counter: ~p", [VR]),
+  ?LOGDEBUG("~p on port ~p received packets confirmation, receive counter: ~p", [Type, Port, VR]),
   UpdatedVR = create_s_packet(VR),
   socket_send(Socket, UpdatedVR),
   reset_timer(t2, Timer),

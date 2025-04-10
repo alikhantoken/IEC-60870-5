@@ -145,13 +145,13 @@ connect(Attempts, #state{
 
   if
     StateRequestLink1 =:= error; StateResetLink =:= error; StateRequestLink2 =:= error ->
-      ?LOGWARNING("CONNECTION ATTEMPT ERROR. REQUEST LINK 1 ~p, RESET LINK ~p, REQUEST LINK 2 ~p. Address: ~p", [
-        StateRequestLink1,
+      ?LOGWARNING("failed to establish connection to link address: ~p, reset link: ~p, request link (1): ~p, request link (2): ~p", [
+        Address,
         StateResetLink,
-        StateRequestLink2,
-        Address
+        StateRequestLink1,
+        StateRequestLink2
       ]),
-      ?LOGDEBUG("Retrying connection, left attempts ~p. Address: ~p", [Attempts - 1, Address]),
+      ?LOGDEBUG("retrying to connect to link address: ~p, remaining attempts: ~p", [Address, Attempts - 1]),
       connect(Attempts - 1, State);
     true ->
       State#state{fcb = 0}
@@ -159,7 +159,7 @@ connect(Attempts, #state{
 connect(_Attempts = 0, #state{
   address = Address
 }) ->
-  ?LOGERROR("CONNECT ERROR. Address: ~p", [Address]),
+  ?LOGERROR("failed to establish connection to link address: ~p, no attempts left...", [Address]),
   error.
 
 data_class(DataClassCode, #state{attempts = Attempts} = State) ->
@@ -177,14 +177,14 @@ reset_link(#state{
   address = Address
 } = State) ->
   Request = build_request(?RESET_REMOTE_LINK, _Data = undefined, State),
-  ?LOGDEBUG("SEND RESET LINK. Address: ~p", [ Address ]),
+  ?LOGDEBUG("sending [RESET LINK] to link address: ~p", [Address]),
   iec60870_ft12:send(PortFT12, Request),
   case wait_response(?ACKNOWLEDGE, undefined, State) of
     {ok, _} ->
-      ?LOGDEBUG("RESET LINK OK. Address: ~p", [ Address ]),
+      ?LOGDEBUG("acknowledged [RESET LINK] from link address: ~p", [Address]),
       ok;
     error ->
-      ?LOGWARNING("FT12 ~p, address ~p: no response received for RESET LINK", [PortFT12, Address]),
+      ?LOGWARNING("no response to [RESET LINK] from link address: ~p, ft12: ~p", [Address, PortFT12]),
       error
   end.
 
@@ -197,14 +197,14 @@ request_status_link(#state{
   address = Address
 } = State) ->
   Request = build_request(?REQUEST_STATUS_LINK, _Data = undefined, State),
-  ?LOGDEBUG("SEND REQUEST STATUS LINK. Address: ~p", [ Address ]),
+  ?LOGDEBUG("sending [REQUEST STATUS LINK] to link address: ~p", [Address]),
   iec60870_ft12:send(PortFT12, Request),
   case wait_response(?STATUS_LINK_ACCESS_DEMAND, undefined, State) of
     {ok, _} ->
-      ?LOGDEBUG("REQUEST LINK OK. Address: ~p", [ Address ]),
+      ?LOGDEBUG("acknowledged [REQUEST STATUS LINK] from link address: ~p", [Address]),
       ok;
     error ->
-      ?LOGWARNING("FT12 port ~p, address ~p: no response received for REQUEST STATUS LINK", [PortFT12, Address]),
+      ?LOGWARNING("no response to [REQUEST STATUS LINK] from link address: ~p, ft12: ~p", [Address, PortFT12]),
       error
   end.
 
@@ -222,10 +222,7 @@ user_data_confirm(Attempts, ASDU, #state{
     {ok, _} ->
       ?UPDATE_FCB(State, Request);
     error ->
-      ?LOGWARNING("FT12 ~p, address ~p: no response received for USER DATA CONFIRM", [
-        PortFT12,
-        Address
-      ]),
+      ?LOGWARNING("no response to [USER DATA CONFIRM] from link address: ~p, ft12: ~p", [Address, PortFT12]),
       user_data_confirm(Attempts - 1, ASDU, State)
   end;
 user_data_confirm(_Attempts = 0, ASDU, #state{
@@ -251,10 +248,7 @@ data_class(Attempts, DataClassCode, #state{
       NewState = ?UPDATE_FCB(State, Request),
       {NewState, ACD, undefined};
     error ->
-      ?LOGWARNING("FT12 ~p, address ~p: no response received for DATA CLASS REQUEST", [
-        PortFT12,
-        Address
-      ]),
+      ?LOGWARNING("no response to [DATA CLASS REQUEST] from link address: ~p, ft12: ~p", [Address, PortFT12]),
       data_class(Attempts - 1, DataClassCode, State)
   end;
 data_class(_Attempts = 0, DataClassCode, #state{
@@ -274,7 +268,7 @@ wait_response(Response1, Response2, #state{
 } = State) ->
   receive
     {data, PortFT12, #frame{address = UnexpectedAddress}} when UnexpectedAddress =/= Address ->
-      ?LOGWARNING("~p received unexpected address: ~p", [Address, UnexpectedAddress]),
+      ?LOGWARNING("link address ~p received unexpected address: ~p", [Address, UnexpectedAddress]),
       wait_response(Response1, Response2, State);
     {data, PortFT12, #frame{
       control_field = #control_field_response{function_code = ResponseCode}
@@ -282,15 +276,15 @@ wait_response(Response1, Response2, #state{
       % TODO: Diagnostic. ASDU
       {ok, Response};
     {data, PortFT12, #frame{control_field = #control_field_request{}} = Frame} when is_function(OnRequest) ->
-      ?LOGDEBUG("~p received request while waiting for response, request: ~p", [Address, Frame]),
+      ?LOGDEBUG("link address ~p received request while waiting for response, request: ~p", [Address, Frame]),
       OnRequest(Frame),
       wait_response(Response1, Response2, State);
     {data, PortFT12, UnexpectedFrame} ->
       % TODO: Diagnostic. PortFT12, UnexpectedFrame
-      ?LOGWARNING("~p received unexpected frame: ~p", [Address, UnexpectedFrame]),
+      ?LOGWARNING("link address ~p received unexpected frame: ~p", [Address, UnexpectedFrame]),
       wait_response(Response1, Response2, State);
     {'EXIT', PortFT12, Reason} ->
-      exit({transport_error, Reason})
+      exit({transport_layer_failure, Reason})
   after
     Timeout -> error
   end.

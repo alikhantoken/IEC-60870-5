@@ -55,7 +55,7 @@ start(Root, Options) ->
     {ready, PID} ->
       PID;
     {'EXIT', PID, Reason} ->
-      ?LOGERROR("server is down due to an error: ~p", [Reason]),
+      ?LOGERROR("failed to start, reason: ~p", [Reason]),
       throw(Reason)
   end.
 
@@ -100,19 +100,19 @@ loop(#data{
 } = Data) ->
   receive
     {data, Switch, #frame{address = ReqAddress}} when ReqAddress =/= Address ->
-      ?LOGWARNING("server w/ link address ~p received unexpected link address: ~p", [Address, ReqAddress]),
+      ?LOGWARNING("~p link address ~p received unexpected link address: ~p", [Name, Address, ReqAddress]),
       loop(Data);
     {data, Switch, Unexpected = #frame{control_field = #control_field_response{}}} ->
-      ?LOGWARNING("server w/ link address ~p received unexpected response frame: ~p", [Address, Unexpected]),
+      ?LOGWARNING("~p link address ~p received unexpected response frame: ~p", [Name, Address, Unexpected]),
       loop(Data);
     {data, Switch, Frame = #frame{control_field = CF, data = UserData}} ->
-      ?LOGDEBUG("server ~p w/ address ~p: received frame: ~p", [Name, Address, Frame]),
+      ?LOGDEBUG("~p link address ~p received frame: ~p", [Name, Address, Frame]),
       case check_fcb(CF, FCB) of
         {ok, NextFCB} ->
           Data1 = handle_request(CF#control_field_request.function_code, UserData, Data),
           loop(Data1#data{fcb = NextFCB});
         error ->
-          ?LOGWARNING("server w/ link address ~p got check fcb error. CF: ~p, FCB: ~p", [Address, CF, FCB]),
+          ?LOGWARNING("~p link address ~p got check FCB error, CF: ~p, FCB: ~p", [Name, Address, CF, FCB]),
           case SentFrame of
             #frame{} -> send_response(Switch, SentFrame);
             _ -> ignore
@@ -121,7 +121,7 @@ loop(#data{
       end
   after
     ?CONNECTION_TIMEOUT ->
-      ?LOGWARNING("server ~p w/ address ~p: connection timeout!", [Name, Address]),
+      ?LOGWARNING("~p link address ~p connection timeout!", [Name, Address]),
       loop(Data)
   end.
 
@@ -137,7 +137,7 @@ handle_request(?RESET_REMOTE_LINK, _UserData, #data{
   address = Address,
   name = Name
 } = Data) ->
-  ?LOGDEBUG("server ~p w/ address ~p: received RESET LINK", [Name, Address]),
+  ?LOGDEBUG("~p link address ~p received [RESET LINK]", [Name, Address]),
   Data#data{
     sent_frame = send_response(Switch, ?ACKNOWLEDGE_FRAME(Address))
   };
@@ -147,7 +147,7 @@ handle_request(?RESET_USER_PROCESS, _UserData, #data{
   address = Address,
   name = Name
 } = Data) ->
-  ?LOGDEBUG("server ~p w/ address ~p: received RESET USER PROCESS", [Name, Address]),
+  ?LOGDEBUG("~p link address ~p received [RESET USER PROCESS]", [Name, Address]),
   drop_asdu(),
   Data#data{
     sent_frame = send_response(Switch, ?ACKNOWLEDGE_FRAME(Address))
@@ -159,7 +159,7 @@ handle_request(?USER_DATA_CONFIRM, ASDU, #data{
   address = Address,
   name = Name
 } = Data) ->
-  ?LOGDEBUG("server ~p w/ address ~p: received USER DATA CONFIRM", [Name, Address]),
+  ?LOGDEBUG("~p link address ~p received [USER DATA CONFIRM]", [Name, Address]),
   Connection ! {asdu, self(), ASDU},
   Data#data{
     sent_frame = send_response(Switch, ?ACKNOWLEDGE_FRAME(Address))
@@ -170,7 +170,7 @@ handle_request(?USER_DATA_NO_REPLY, ASDU, #data{
   address = Address,
   name = Name
 } = Data) ->
-  ?LOGDEBUG("server ~p w/ address ~p: received USER DATA CONFIRM", [Name, Address]),
+  ?LOGDEBUG("~p link address ~p received [USER DATA CONFIRM]", [Name, Address]),
   Connection ! {asdu, self(), ASDU},
   Data;
 
@@ -179,7 +179,7 @@ handle_request(?ACCESS_DEMAND, _UserData, #data{
   address = Address,
   name = Name
 } = Data) ->
-  ?LOGDEBUG("server ~p w/ address ~p: received ACCESS DEMAND", [Name, Address]),
+  ?LOGDEBUG("~p link address ~p received [ACCESS DEMAND]", [Name, Address]),
   Data#data{
     sent_frame = send_response(Switch, #frame{
       address = Address,
@@ -197,7 +197,7 @@ handle_request(?REQUEST_STATUS_LINK, _UserData, #data{
   address = Address,
   name = Name
 } = Data) ->
-  ?LOGDEBUG("server ~p w/ address ~p: received REQUEST STATUS LINK", [Name, Address]),
+  ?LOGDEBUG("~p link address ~p received [REQUEST STATUS LINK]", [Name, Address]),
   Data#data{
     sent_frame = send_response(Switch, #frame{
       address = Address,
@@ -220,7 +220,11 @@ handle_request(RequestData, _UserData, #data{
   Response =
     case check_data() of
       {ok, ConnectionData} ->
-        ?LOGDEBUG("server ~p w/ address ~p: message queue: ~p", [Name, Address, element(2,erlang:process_info(self(), message_queue_len))]),
+        ?LOGDEBUG("~p link address ~p message queue: ~p", [
+          Name,
+          Address,
+          element(2,erlang:process_info(self(), message_queue_len))
+        ]),
         #frame{
           address = Address,
           control_field = #control_field_response{
@@ -243,13 +247,13 @@ handle_request(RequestData, _UserData, #data{
           }
         }
     end,
-  ?LOGDEBUG("server ~p w/ address ~p: received DATA CLASS REQUEST, our RESPONSE: ~p", [Name, Address, Response]),
+  ?LOGDEBUG("link address ~p received [DATA CLASS REQUEST], replying: ~p", [Name, Address, Response]),
   Data#data{
     sent_frame = send_response(Switch, Response)
   };
 
-handle_request(InvalidFC, _UserData, #data{address = Address} = Data) ->
-  ?LOGERROR("server w/ link address ~p received invalid request function code: ~p", [Address, InvalidFC]),
+handle_request(InvalidFC, _UserData, #data{name = Name, address = Address} = Data) ->
+  ?LOGERROR("~p link address ~p received invalid request function code: ~p", [Name, Address, InvalidFC]),
   Data.
 
 send_response(Switch, Frame) ->

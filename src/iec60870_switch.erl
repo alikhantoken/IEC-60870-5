@@ -22,7 +22,7 @@
 %%% |                       Macros & Records                       |
 %%% +--------------------------------------------------------------+
 
--record(switch_state, {
+-record(state, {
   name,
   port_ft12,
   servers,
@@ -55,12 +55,12 @@ add_server(Switch, Address) ->
 %%% +--------------------------------------------------------------+
 
 init_switch(ServerPID, #{transport := #{name := PortName}} = Options) ->
-  RegisterName = list_to_atom(PortName),
-  case catch register(RegisterName, self()) of
+  RegisteredName = list_to_atom(PortName),
+  case catch register(RegisteredName, self()) of
     % Probably already registered
     % Check the registered PID by the port name
     {'EXIT', _} ->
-      case whereis(RegisterName) of
+      case whereis(RegisteredName) of
         Switch when is_pid(Switch) ->
           ServerPID ! {ready, self(), Switch};
         _ ->
@@ -68,19 +68,24 @@ init_switch(ServerPID, #{transport := #{name := PortName}} = Options) ->
       end;
     % Succeeded to register port, start the switch
     true ->
-      FT12_options = maps:with([transport, address_size], Options),
-      case catch iec60870_ft12:start_link( FT12_options ) of
+      OptionsFT12 = maps:with([transport, address_size], Options),
+      case catch iec60870_ft12:start_link( OptionsFT12 ) of
         {'EXIT', Error} ->
-          ?LOGERROR("switch ~p failed to start transport, error: ~p", [PortName, Error]),
-          exit({transport_init_fail, Error});
+          ?LOGERROR("~p failed to start transport layer (ft12), error: ~p", [PortName, Error]),
+          exit({transport_layer_init_failure, Error});
         PortFT12 ->
           process_flag(trap_exit, true),
           ServerPID ! {ready, self(), self()},
-          switch_loop(#switch_state{port_ft12 = PortFT12, servers = #{}, name = PortName, options = FT12_options})
+          switch_loop(#state{
+            port_ft12 = PortFT12,
+            name = PortName,
+            options = OptionsFT12,
+            servers = #{}
+          })
       end
   end.
 
-switch_loop(#switch_state{
+switch_loop(#state{
   name = Name,
   port_ft12 = PortFT12,
   servers = Servers
@@ -91,7 +96,7 @@ switch_loop(#switch_state{
       % Check if the link address is served by a switch
       case maps:get(LinkAddress, Servers, none) of
         none ->
-          ?LOGWARNING("switch received unexpected link address: ~p", [LinkAddress]);
+          ?LOGWARNING("~p received unexpected link address: ~p", [Name, LinkAddress]);
         ServerPID ->
           ServerPID ! {data, self(), Frame}
       end,
@@ -102,25 +107,25 @@ switch_loop(#switch_state{
       % Checking if the link address is served by a switch
       case maps:get(LinkAddress, Servers, none) of
         none ->
-          ?LOGWARNING("switch received an unexpected link address for sending data: ~p", [LinkAddress]);
+          ?LOGWARNING("~p received unexpected link address for data transmit: ~p", [Name, LinkAddress]);
         ServerPID ->
           iec60870_ft12:send(PortFT12, Frame);
         _Other ->
-          ?LOGWARNING("switch received unexpected server PID: ~p", [ServerPID])
+          ?LOGWARNING("~p received unexpected server PID: ~p", [ServerPID])
       end,
       switch_loop(State);
 
     % Add new server to the switch
     {add_server, ServerPID, LinkAddress } ->
       ServerPID ! {ok, self()},
-      switch_loop(State#switch_state{
+      switch_loop(State#state{
         % Link addresses are associated with server PIDs
         servers = Servers#{LinkAddress => ServerPID}
       });
 
     % Port FT12 is down, transport level is unavailable
     {'EXIT', PortFT12, Reason} ->
-      ?LOGERROR("switch port ~p exit, ft12 transport error: ~p", [Name, Reason]),
+      ?LOGERROR("~p received EXIT from transport layer (ft12), reason: ~p", [Name, Reason]),
       exit(Reason);
 
     % Message from the server which has been shut down
@@ -129,38 +134,38 @@ switch_loop(#switch_state{
       RestServers = maps:filter(fun(_A, PID) -> PID =/= DeadServer end, Servers),
       if
         map_size(RestServers) =:= 0 ->
-          ?LOGINFO("switch on port ~p has been shutdown due to no remaining servers", [Name]),
+          ?LOGINFO("~p terminating, no servers left...", [Name]),
           iec60870_ft12:stop(PortFT12),
           exit(shutdown);
         true ->
-          switch_loop(State#switch_state{servers = RestServers})
+          switch_loop(State#state{servers = RestServers})
       end;
     Unexpected ->
-      ?LOGWARNING("switch on port ~p received unexpected message: ~p", [Name, Unexpected]),
+      ?LOGWARNING("~p received unexpected message: ~p", [Name, Unexpected]),
       switch_loop(State)
   after
     ?SILENT_TIMEOUT ->
-      ?LOGWARNING("switch ~p silence timeout, transport reinitialization", [Name]),
+      ?LOGWARNING("~p entered silence timeout, reinitializing transport layer...", [Name]),
       NewState = restart_transport(State),
-      ?LOGINFO("switch ~p reinialized after silence timeout", [Name]),
+      ?LOGINFO("~p successfully reinitialized after silence timeout", [Name]),
       switch_loop(NewState)
   end.
 
-restart_transport(#switch_state{
+restart_transport(#state{
   name = Name,
   port_ft12 = PortFT12,
   options = Options
 } = State) ->
-  ?LOGDEBUG("switch ~p stopping FT12 ~p", [Name, PortFT12]),
+  ?LOGDEBUG("~p stopping transport layer (ft12): ~p", [Name, PortFT12]),
   iec60870_ft12:stop(PortFT12),
   wait_stopped(PortFT12),
-  ?LOGDEBUG("switch ~p FT12 ~p stopped ", [Name, PortFT12]),
+  ?LOGDEBUG("~p transport layer stopped successfully (ft12): ~p", [Name, PortFT12]),
   case catch iec60870_ft12:start_link(Options) of
     {'EXIT', Error} ->
-      ?LOGERROR("switch ~p failed to restart transport, error: ~p", [Name, Error]),
-      exit({transport_init_fail, Error});
+      ?LOGERROR("~p failed to restart transport layer, error: ~p", [Name, Error]),
+      exit({transport_layer_reinit_failure, Error});
     NewPortFT12 ->
-      State#switch_state{port_ft12 = NewPortFT12}
+      State#state{port_ft12 = NewPortFT12}
   end.
 
 wait_stopped(PortFT12) ->

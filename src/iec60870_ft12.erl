@@ -65,7 +65,7 @@ start_link(InOptions) ->
     {ready, PID} ->
       PID;
     {'EXIT', PID, Reason} ->
-      ?LOGERROR("FT12 failed to start w/ reason: ~p", [Reason]),
+      ?LOGERROR("failed to start, error: ~p", [Reason]),
       throw({error, Reason})
   end.
 
@@ -75,8 +75,8 @@ send(Port, Frame) ->
       Port ! {send, self(), Frame},
       ok;
     _ ->
-      ?LOGWARNING("FT12. send error: port is closed"),
-      throw(port_is_closed)
+      ?LOGWARNING("failed to send: port ~p is closed!", [Port]),
+      throw(serial_port_closed)
   end.
 
 stop(PortFT12) ->
@@ -89,7 +89,7 @@ stop(PortFT12) ->
 init(Owner, #{
   transport := #{
     type := Type,
-    name := String
+    name := Name
   },
   address_size := AddressSize
 } = ConnectionSettings) ->
@@ -97,7 +97,7 @@ init(Owner, #{
     {ok, Connection} ->
       Owner ! {ready, self()},
       loop(#state{
-        name = String,
+        name = Name,
         owner = Owner,
         type = Type,
         connection = Connection,
@@ -105,39 +105,40 @@ init(Owner, #{
         buffer = <<>>
       });
     {error, ConnectionError} ->
+      ?LOGERROR("failed to initialize connection: ~p, error: ~p", [Name, ConnectionError]),
       exit(ConnectionError)
   end.
 
 start_connection(#{
   transport := #{
     type := tcp,
-    name := String
+    name := Name
   }
 }) ->
-  {ok, {Host, Port}} = parse_tcp_setting(String),
-  ?LOGDEBUG("FT12 ~p: trying to connect...", [String]),
+  {ok, {Host, Port}} = parse_tcp_setting(Name),
+  ?LOGDEBUG("trying to connect to ~p", [Name]),
   case gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}], ?CONNECT_TIMEOUT) of
     {ok, Socket} ->
-      ?LOGDEBUG("FT12 ~p: socket ~p is opened!", [String, Socket]),
+      ?LOGDEBUG("opened socket: ~p, endpoint: ~p", [Socket, Name]),
       {ok, Socket};
     {error, Error} ->
-      ?LOGERROR("FT12 ~p: failed to connect to socket, error: ~p", [String, Error]),
+      ?LOGERROR("failed to connect to ~p, error: ~p", [Name, Error]),
       {error, Error}
   end;
 
 start_connection(#{
   transport := #{
     type := serial,
-    name := Name
+    name := SerialPortName
   } = PortOptions
 }) ->
-  ?LOGDEBUG("FT12 ~p: trying to open eserial...", [Name]),
-  case eserial:open(Name, maps:without([type, name], PortOptions)) of
+  ?LOGDEBUG("trying to open serial port ~p", [SerialPortName]),
+  case eserial:open(SerialPortName, maps:without([type, name], PortOptions)) of
     {ok, SerialPort} ->
-      ?LOGDEBUG("FT12 ~p: eserial is opened!", [Name]),
+      ?LOGDEBUG("serial port ~p opened!", [SerialPortName]),
       {ok, SerialPort};
     {error, Error} ->
-      ?LOGERROR("FT12 ~p: failed to start eserial, error: ~p", [Name, Error]),
+      ?LOGERROR("failed to open serial port ~p, error: ~p", [SerialPortName, Error]),
       {error, Error}
   end.
 
@@ -152,12 +153,12 @@ loop(#state{
   receive
     {tcp, Connection, Data} ->
       TailBuffer = parse(Owner, Name, <<Buffer/binary, Data/binary>>, AddressSize),
-      ?LOGDEBUG("FT12 ~p: tail buffer: ~p", [Name, TailBuffer]),
+      ?LOGDEBUG("serial ~p tail buffer: ~p", [Name, TailBuffer]),
       loop(State#state{buffer = TailBuffer});
 
     {Connection, data, Data} ->
       TailBuffer = parse(Owner, Name, <<Buffer/binary, Data/binary>>, AddressSize),
-      ?LOGDEBUG("FT12 ~p: tail buffer: ~p", [Name, TailBuffer]),
+      ?LOGDEBUG("serial ~p tail buffer: ~p", [Name, TailBuffer]),
       loop(State#state{buffer = TailBuffer});
 
     {send, Owner, Frame} ->
@@ -173,22 +174,22 @@ loop(#state{
             State
         end,
       Packet = build_frame(Frame, AddressSize),
-      ?LOGDEBUG("FT12 ~p: sending frame: ~p, packet ~p", [Name, Frame, Packet]),
+      ?LOGDEBUG("serial ~p sending frame: ~p, packet ~p", [Name, Frame, Packet]),
       send(Type, Connection, Packet),
       loop(OutState);
 
     {tcp_closed, Connection} ->
-      ?LOGERROR("FT12 ~p: tcp closed", [Name]),
+      ?LOGERROR("serial ~p tcp closed", [Name]),
       exit(closed);
     {tcp_error, Connection, Reason} ->
-      ?LOGERROR("FT12 ~p: tcp error: ~p", [Name, Reason]),
+      ?LOGERROR("serial ~p tcp error: ~p", [Name, Reason]),
       exit(Reason);
     {tcp_passive, Connection} ->
-      ?LOGERROR("FT12 ~p: tcp passive", [Name]),
+      ?LOGERROR("serial ~p tcp passive error", [Name]),
       exit(tcp_passive);
 
     Unexpected ->
-      ?LOGWARNING("FT12 ~p: unexpected message received ~p", [Name, Unexpected]),
+      ?LOGWARNING("serial ~p received unexpected message ~p", [Name, Unexpected]),
       loop(State)
   end.
 
@@ -211,7 +212,7 @@ send(serial, SerialPort, Data) ->
 parse(Owner, Name, BinaryData, AddressSize) ->
   case parse_frame(BinaryData, AddressSize) of
     {#frame{} = Frame, Tail} ->
-      ?LOGDEBUG("FT12 ~p: received frame: ~p, data ~p", [Name, Frame, build_frame( Frame, AddressSize )]),
+      ?LOGDEBUG("serial ~p received frame: ~p, data ~p", [Name, Frame, build_frame( Frame, AddressSize )]),
       Owner ! {data, self(), Frame},
       Tail;
     {_NoFrame, Tail} ->

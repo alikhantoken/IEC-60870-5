@@ -190,4 +190,4 @@ split(DataObjects, _MaxSize)->
 check_common_address(COA, ReceivedCOA) when COA =:= ReceivedCOA ->
   ok;
 check_common_address(_, ReceivedCOA) ->
-  throw({error, {invalid_coa_received, ReceivedCOA}}).
+  throw({error, {invalid_common_address_received, ReceivedCOA}}).

@@ -45,6 +45,8 @@
 
 -record(state,{
   server,
+  type,
+  name,
   module,
   esubscribe,
   connection_settings
@@ -74,7 +76,7 @@ start(InSettings) ->
     {ready, PID, ServerRef} ->
       ServerRef;
     {'EXIT', PID, Reason} ->
-      ?LOGERROR("server failed to start due to a reason: ~p", [Reason]),
+      ?LOGERROR("startup failed, reason: ~p", [Reason]),
       throw(Reason)
   end.
 
@@ -154,8 +156,8 @@ start_connection(Root, Server, Connection) ->
         {ok, PID};
       {Root, error} ->
         error;
-      {'DOWN', MonitorRef, process, Root, _Reason} ->
-        ?LOGWARNING("failed to start server connection due to root process is down"),
+      {'DOWN', MonitorRef, process, Root, Reason} ->
+        ?LOGWARNING("failed to start server connection, root process is down: ~p", [Reason]),
         error
     end
   after
@@ -218,9 +220,12 @@ init_server(Owner, #{
   },
   Owner ! {ready, self(), Ref},
   process_flag(trap_exit, true),
+  ?LOGINFO("starting ~p of type ~p", [Name, Type]),
   await_connection(#state{
     module = Module,
     server = Server,
+    type = Type,
+    name = Name,
     esubscribe = EsubscribePID,
     connection_settings = ConnectionSettings
   }).
@@ -228,6 +233,8 @@ init_server(Owner, #{
 await_connection(#state{
   module = Module,
   server = Server,
+  type = Type,
+  name = Name,
   connection_settings = ConnectionSettings
 } = State) ->
   receive
@@ -236,15 +243,16 @@ await_connection(#state{
         {ok, PID} ->
           From ! {self(), PID};
         {error, Error} ->
-          ?LOGERROR("unable to start process for incoming connection, error ~p",[Error]),
+          ?LOGERROR("~p of type ~p failed to start process for incoming connection, error: ~p", [Name, Type, Error]),
           From ! {self(), error}
       end,
       await_connection(State);
     {'EXIT', _PID, Reason} ->
+      ?LOGERROR("~p of type ~p terminating w/ reason: ~p", [Name, Type, Reason]),
       catch Module:stop_server(Server),
       exit(Reason);
     Unexpected ->
-      ?LOGWARNING("unexpected mesaage ~p", [Unexpected]),
+      ?LOGWARNING("~p of type ~p received unexpected message: ~p", [Name, Type, Unexpected]),
       await_connection(State)
   end.
 

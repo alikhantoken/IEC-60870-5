@@ -96,7 +96,7 @@ init({Root, Connection, #{
 } = Settings}) ->
   process_flag(trap_exit, true),
   link(Connection),
-  ?LOGINFO("server ~p: initiating incoming connection...", [Name]),
+  ?LOGINFO("~p starting state machine...", [Name]),
   {ok, SendQueue} = start_link_send_queue(Name, Connection),
   {ok, UpdateQueue} = start_link_update_queue(Name, Storage, SendQueue, ASDUSettings),
   init_group_requests(Groups),
@@ -108,7 +108,8 @@ init({Root, Connection, #{
     update_queue = UpdateQueue
   }}.
 
-handle_event(enter, _PrevState, ?RUNNING, _Data) ->
+handle_event(enter, _PrevState, ?RUNNING, #state{settings = #{name := Name}} = _Data) ->
+  ?LOGINFO("~p entering state - running", [Name]),
   keep_state_and_data;
 
 %% Incoming packets from the connection
@@ -124,7 +125,7 @@ handle_event(info, {asdu, Connection, ASDU}, _AnyState, #state{
     handle_asdu(ParsedASDU, State)
   catch
     _Exception:Error ->
-      ?LOGERROR("server ~p: received invalid ASDU. ASDU: ~p, Error: ~p", [Name, ASDU, Error]),
+      ?LOGERROR("~p received invalid asdu: ~p, error: ~p", [Name, ASDU, Error]),
       keep_state_and_data
   end;
 
@@ -140,7 +141,7 @@ handle_event(info, {'EXIT', PID, Reason}, _AnyState, #state{
     name := Name
   }
 }) ->
-  ?LOGERROR("server ~p: received EXIT from PID: ~p, reason: ~p", [Name, PID, Reason]),
+  ?LOGERROR("~p received EXIT from PID: ~p, reason: ~p", [Name, PID, Reason]),
   {stop, Reason};
 
 handle_event(EventType, EventContent, _AnyState, #state{
@@ -148,7 +149,7 @@ handle_event(EventType, EventContent, _AnyState, #state{
     name := Name
   }
 }) ->
-  ?LOGWARNING("server ~p: connection received unexpected event type. Event: ~p, Content: ~p", [
+  ?LOGWARNING("~p received unexpected event: ~p, content: ~p", [
     Name, EventType, EventContent
   ]),
   keep_state_and_data.
@@ -164,7 +165,7 @@ terminate(Reason, _, #state{
   catch exit(SendQueue, shutdown),
   catch exit(UpdateQueue, shutdown),
   catch exit(Connection, shutdown),
-  ?LOGERROR("server ~p: connection is terminated w/ reason: ~p", [Name, Reason]),
+  ?LOGERROR("~p terminated w/ reason: ~p", [Name, Reason]),
   ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -229,7 +230,8 @@ handle_asdu(#asdu{
   settings = #{
     command_handler := Handler,
     asdu := ASDUSettings,
-    root := ServerRef
+    root := ServerRef,
+    name := Name
   }
 } = State)
   when (Type >= ?C_SC_NA_1 andalso Type =< ?C_BO_NA_1)
@@ -240,7 +242,7 @@ handle_asdu(#asdu{
         [{IOA, Value}] = Objects,
         case Handler(ServerRef, Type, IOA, Value) of
           {error, HandlerError} ->
-            ?LOGERROR("remote control handler returned error: ~p", [HandlerError]),
+            ?LOGERROR("~p remote control handler returned error: ~p", [Name, HandlerError]),
             NegativeConfirmation = build_asdu(Type, ?COT_ACTCON, ?NEGATIVE_PN, Objects, ASDUSettings),
             send_asdu(?REMOTE_CONTROL_PRIORITY, NegativeConfirmation, State);
           ok ->
@@ -252,15 +254,15 @@ handle_asdu(#asdu{
             send_asdu(?REMOTE_CONTROL_PRIORITY, Termination, State)
         end
       catch
-        _Exception:Reason ->
-          ?LOGERROR("remote control handler failed. Reason: ~p", [Reason]),
+        _Exception:Error ->
+          ?LOGERROR("~p remote control handler failed, error: ~p", [Name, Error]),
           %% +-------[ Negative activation confirmation ]---------+
           ExceptionNegConfirmation = build_asdu(Type, ?COT_ACTCON, ?NEGATIVE_PN, Objects, ASDUSettings),
           send_asdu(?REMOTE_CONTROL_PRIORITY, ExceptionNegConfirmation, State)
       end;
     true ->
       %% +-------[ Negative activation confirmation ]---------+
-      ?LOGWARNING("remote control request accepted but no handler is defined"),
+      ?LOGWARNING("~p remote control request accepted but no handler defined", [Name]),
       NegativeConfirmation = build_asdu(Type, ?COT_ACTCON, ?NEGATIVE_PN, Objects, ASDUSettings),
       send_asdu(?REMOTE_CONTROL_PRIORITY, NegativeConfirmation, State)
   end,
@@ -309,7 +311,7 @@ handle_asdu(#asdu{
 }, #state{
   settings = #{name := Name}
 }) ->
-  ?LOGWARNING("~p server received unsupported ASDU type. Type: ~p", [Name, Type]),
+  ?LOGWARNING("~p received unsupported asdu type: ~p", [Name, Type]),
   keep_state_and_data.
 
 send_asdu(Priority, ASDU, #state{
@@ -360,6 +362,7 @@ start_link_update_queue(Name, Storage, SendQueue, ASDUSettings) ->
         set,
         private
       ]),
+      ?LOGINFO("~p starting update queue...", [Name]),
       update_queue(#update_state{
         owner = Owner,
         name = Name,
@@ -395,7 +398,7 @@ update_queue(#update_state{
         end,
         InState;
 
-    % Confirmation of the ticket reference from
+      % Confirmation of the ticket reference from
       {confirm, TicketRef} ->
         InState#update_state{tickets = maps:remove(TicketRef, Tickets)};
 
@@ -412,7 +415,7 @@ update_queue(#update_state{
             CurrentGroup -> ?POSITIVE_PN;
             _Other -> ?NEGATIVE_PN
           end,
-        ?LOGDEBUG("server ~p, update queue received GI to group ~p while handling other GI group ~p, PN: ~p", [
+        ?LOGDEBUG("~p received general interrogation to group ~p while handling other gi group ~p, pn: ~p", [
           Name,
           Group,
           CurrentGroup,
@@ -436,7 +439,7 @@ update_queue(#update_state{
 
       % Handling general interrogation from the connection
       {general_interrogation, Owner, Group} ->
-        ?LOGDEBUG("server ~p, update queue received GI to group: ~p", [Name, Group]),
+        ?LOGDEBUG("~p received general interrogation, group: ~p", [Name, Group]),
         [Confirmation] = iec60870_asdu:build(#asdu{
           type = ?C_IC_NA_1,
           pn = ?POSITIVE_PN,
@@ -456,9 +459,8 @@ update_queue(#update_state{
             InState#update_state{group = Group}
         end;
 
-      % All other unexpected messages
       Unexpected ->
-        ?LOGWARNING("update queue ~p: received unexpected message: ~p", [Name, Unexpected]),
+        ?LOGWARNING("~p received unexpected message: ~p", [Name, Unexpected]),
         InState
     end,
   OutState = check_tickets(State),
@@ -481,9 +483,9 @@ check_tickets(InState) ->
     '$end_of_table' ->
       InState;
     NextPointer ->
-      ?LOGDEBUG("NextPointer: ~p",[NextPointer]),
+      ?LOGDEBUG("next pointer: ~p", [NextPointer]),
       Updates = get_pointer_updates(NextPointer, InState),
-      ?LOGDEBUG("pointer updates: ~p",[Updates]),
+      ?LOGDEBUG("pointer updates: ~p", [Updates]),
       State = send_updates(Updates, NextPointer, InState),
       check_gi_termination(State)
   end.
@@ -595,7 +597,7 @@ enqueue_update(Priority, COT, {IOA, #{type := Type}}, #update_state{
   },
   case ets:lookup(IndexIOA, IOA) of
     [] ->
-      ?LOGDEBUG("enqueue update ioa: ~p, priority: ~p",[ IOA, Priority ]),
+      ?LOGDEBUG("ioa: ~p, priority: ~p",[ IOA, Priority ]),
       ets:insert(UpdateQueue, {Order, true}),
       ets:insert(IndexIOA, {IOA, Order});
     [{_, #order{pointer = #pointer{priority = HasPriority}}}] when HasPriority < Priority ->
@@ -603,7 +605,7 @@ enqueue_update(Priority, COT, {IOA, #{type := Type}}, #update_state{
       ?LOGDEBUG("ignore update ioa: ~p, priority: ~p, has prority: ~p",[ IOA, Priority, HasPriority ]),
       ignore;
     [{ _, PrevOrder}] ->
-      ?LOGDEBUG("update priority ioa: ~p, priority: ~p, previous order: ~p",[ IOA, Priority, PrevOrder ]),
+      ?LOGDEBUG("ioa: ~p, priority: ~p, previous order: ~p",[ IOA, Priority, PrevOrder ]),
       ets:delete(UpdateQueue, PrevOrder),
       ets:insert(UpdateQueue, {Order, true}),
       ets:insert(IndexIOA, {IOA, Order})
@@ -630,6 +632,7 @@ start_link_send_queue(Name, Connection) ->
         ordered_set,
         private
       ]),
+      ?LOGINFO("~p starting send queue...", [Name]),
       send_queue(#send_state{
         owner = Owner,
         name = Name,
@@ -659,7 +662,7 @@ send_queue(#send_state{
         ets:insert(SendQueue, {{Priority, Counter}, {none, ASDU}}),
         InState#send_state{counter = Counter + 1};
       Unexpected ->
-        ?LOGWARNING("send queue ~p process received unexpected message: ~p", [Name, Unexpected]),
+        ?LOGWARNING("~p received unexpected message: ~p", [Name, Unexpected]),
         InState
     end,
   OutState = check_send_queue(State),
