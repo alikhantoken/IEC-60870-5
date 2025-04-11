@@ -177,8 +177,6 @@ handle_event(
     ParsedASDU = iec60870_asdu:parse(ASDU, ASDUSettings),
     {keep_state_and_data, [{next_event, internal, ParsedASDU}]}
   catch
-    _:{invalid_object, _Value} = Error ->
-      {stop, Error, Data};
     _:Error ->
       ?LOGERROR("~p connection ~p received invalid asdu: ~p, error: ~p", [Name, CurrentConnection, ASDU, Error]),
       keep_state_and_data

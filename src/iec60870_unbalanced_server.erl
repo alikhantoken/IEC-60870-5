@@ -74,6 +74,7 @@ init(Root, #{
   iec60870_switch:add_server(Switch, Address),
   Root ! {ready, self()},
   Connection = start_connection(Root),
+  ?LOGINFO("~p starting, root: ~p, link address: ~p", [PortName, Root, Address]),
   loop(#data{
     name = PortName,
     root = Root,
@@ -88,7 +89,8 @@ start_connection(Root) ->
     {ok, NewConnection} ->
       NewConnection;
     error ->
-      exit(server_stm_start_failed)
+      ?LOGERROR("failed to start server state machine, root: ~p", [Root]),
+      exit({server_statem_start_failure, {self, self()}, {root, Root}})
   end.
 
 loop(#data{

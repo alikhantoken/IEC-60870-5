@@ -77,6 +77,7 @@ init_client(Owner, #{cycle := Cycle, transport := #{name := PortName}} = Options
   State = connect(Port, Options),
   Owner ! {connected, self()},
   self() ! {update, self()},
+  ?LOGINFO("~p starting, owner: ~p, cycle: ~p", [PortName, Owner, Cycle]),
   loop(#data{
     state = State,
     name = PortName,
@@ -85,13 +86,15 @@ init_client(Owner, #{cycle := Cycle, transport := #{name := PortName}} = Options
     port = Port
   }).
 
-connect(Port, Options) ->
+connect(Port, #{transport := #{name := PortName}} = Options) ->
   Port ! {add_client, self(), Options},
   receive
     {ok, Port, ClientState} ->
+      ?LOGINFO("~p successfully added self to ~p", [PortName, Port]),
       ClientState;
-    {error, Port, ConnectError} ->
-      exit(ConnectError)
+    {error, Port, AddClientError} ->
+      ?LOGERROR("~p failed to add self to ~p, error: ~p", [PortName, Port, AddClientError]),
+      exit(AddClientError)
   end.
 
 loop(#data{
@@ -140,7 +143,7 @@ send_data_class_request(DataClass, #data{
   case send_request(Port, DataClassRequest) of
     error ->
       ?LOGERROR("~p failed to request [DATA CLASS ~p]", [Port, DataClass]),
-      exit({error, {data_class_request_failure, DataClass}});
+      exit({data_class_request_failure, DataClass});
     {NewState, ACD, ASDU} ->
       send_asdu_to_owner(Owner, ASDU),
       check_access_demand(ACD),
@@ -150,8 +153,11 @@ send_data_class_request(DataClass, #data{
 send_request(Port, Function) ->
   Port ! {request, self(), Function},
   receive
-    {Port, Result} -> Result;
-    {'DOWN', _, process, Port, Reason} -> exit( Reason )
+    {Port, Result} ->
+      Result;
+    {'DOWN', _, process, Port, Reason} ->
+      ?LOGERROR("~p received DOWN from port: ~p, reason: ~p", [Port, Reason]),
+      exit(Reason)
   end.
 
 send_asdu(ASDU, #data{
@@ -163,11 +169,11 @@ send_asdu(ASDU, #data{
   Request = fun() -> iec60870_101:user_data_confirm(ASDU, State) end,
   case send_request(Port, Request) of
     error ->
-      ?LOGERROR("~p failed to send ASDU: ~p", [Name, ASDU]),
+      ?LOGERROR("~p failed to send asdu: ~p", [Name, ASDU]),
       Owner ! {send_error, self(), timeout},
       Data;
     NewState ->
-      ?LOGDEBUG("~p successfully sent ASDU", [Name]),
+      ?LOGDEBUG("~p successfully sent asdu", [Name]),
       Data#data{state = NewState}
   end.
 

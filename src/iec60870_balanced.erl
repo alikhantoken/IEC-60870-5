@@ -144,11 +144,11 @@ loop(#data{
       NewState =
         case iec60870_101:user_data_confirm(ASDU, State) of
           error ->
-            ?LOGERROR("~p failed to send ASDU", [Address]),
+            ?LOGERROR("~p failed to send asdu: ", [Address, ASDU]),
             Owner ! {send_error, self(), timeout},
             State;
           State1 ->
-            ?LOGDEBUG("~p balanced send user ASDU", [Address]),
+            ?LOGDEBUG("~p balanced sent user asdu: ", [Address, ASDU]),
             State1
         end,
       loop(Data#data{state = NewState});

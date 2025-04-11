@@ -544,7 +544,8 @@ create_information_element(?C_CI_NA_1, GroupCounterID) ->
 create_information_element(?C_CS_NA_1, Timestamp) ->
   get_cp56(Timestamp);
 
-create_information_element(OtherType, _) -> throw({unsupported_object_type, OtherType}).
+create_information_element(OtherType, _) ->
+  throw({unsupported_object_type, OtherType}).
 
 %% +--------------------------------------------------------------+
 %% |                     Internal functions                       |

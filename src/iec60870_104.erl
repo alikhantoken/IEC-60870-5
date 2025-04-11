@@ -142,7 +142,7 @@ start_client(InSettings) ->
 accept_connection(ListenSocket, #{port := Port} = Settings, Root) ->
   spawn(
     fun() ->
-      ?LOGINFO("server on port ~p starting acceptor ~p", [Port, self()]),
+      ?LOGINFO("server on port ~p starting acceptor ~p, root: ~p", [Port, self(), Root]),
       erlang:monitor(process, Root),
       Socket = accept_loop(ListenSocket, Root),
       accept_connection(ListenSocket, Settings, Root),
@@ -163,7 +163,7 @@ accept_connection(ListenSocket, #{port := Port} = Settings, Root) ->
             error ->
               ?LOGERROR("server port ~p failed to spawn process for incoming connection - internal error", [Port]),
               gen_tcp:close(Socket),
-              exit(server_connection_accept_failure)
+              exit({server_connection_accept_failure, {port, Port}})
           end;
         {error, ActivationError} ->
           ?LOGWARNING("server port ~p failed to activate incoming connection: ~p", [Port, ActivationError]),
@@ -232,11 +232,12 @@ loop(#state{
       NewState = handle_command(Command, State),
       loop(NewState);
 
-    % Errors from TCP
     {tcp_closed, Socket} ->
+      ?LOGERROR("~p on port ~p received TCP error: connection closed!", [Type, Port]),
       exit(closed);
-    {tcp_error, Socket, Reason} ->
-      exit(Reason);
+    {tcp_error, Socket, Error} ->
+      ?LOGERROR("~p on port ~p received TCP error: ", [Type, Port, Error]),
+      exit(Error);
     {tcp_passive, Socket} ->
       exit(tcp_passive);
     {'DOWN', _, process, _, Error} ->

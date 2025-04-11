@@ -96,7 +96,7 @@ init({Root, Connection, #{
 } = Settings}) ->
   process_flag(trap_exit, true),
   link(Connection),
-  ?LOGINFO("~p starting state machine...", [Name]),
+  ?LOGINFO("~p starting state machine, root: ~p, connection: ~p", [Name, Root, Connection]),
   {ok, SendQueue} = start_link_send_queue(Name, Connection),
   {ok, UpdateQueue} = start_link_update_queue(Name, Storage, SendQueue, ASDUSettings),
   init_group_requests(Groups),
@@ -583,7 +583,7 @@ collect_group_updates(GroupID, Storage) ->
   end.
 
 send_update(SendQueue, Priority, ASDU) ->
-  ?LOGDEBUG("enqueue ASDU: ~p",[ASDU]),
+  ?LOGDEBUG("enqueue asdu: ~p",[ASDU]),
   SendQueue ! {send_confirm, self(), Priority, ASDU},
   receive {accepted, TicketRef} -> TicketRef end.
 

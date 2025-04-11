@@ -90,12 +90,13 @@ init(Owner, #{
   transport := #{
     type := Type,
     name := Name
-  },
+  } = Transport,
   address_size := AddressSize
 } = ConnectionSettings) ->
   case start_connection(ConnectionSettings) of
     {ok, Connection} ->
       Owner ! {ready, self()},
+      ?LOGINFO("~p of type ~p starting, transport configuration: ~p", [Name, Type, Transport]),
       loop(#state{
         name = Name,
         owner = Owner,

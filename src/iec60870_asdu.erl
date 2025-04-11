@@ -176,8 +176,8 @@ parse_dui(COASize, ORGSize,
   },
   {DUI, Body};
 
-parse_dui(_COASize, _ORGSize, InvalidASDU) ->
-  throw({invalid_asdu_format, InvalidASDU}).
+parse_dui(COASize, ORGSize, InvalidASDU) ->
+  throw({invalid_asdu_format, {asdu, InvalidASDU}, {coa_size, COASize}, {org_size, ORGSize}}).
 
 %% Splits objects depending on the maximum size which
 %% on the other hand depends on the type of object
@@ -189,5 +189,5 @@ split(DataObjects, _MaxSize)->
 
 check_common_address(COA, ReceivedCOA) when COA =:= ReceivedCOA ->
   ok;
-check_common_address(_, ReceivedCOA) ->
-  throw({error, {invalid_common_address_received, ReceivedCOA}}).
+check_common_address(COA, ReceivedCOA) ->
+  throw({invalid_common_address_received, {coa, COA}, {received_coa, ReceivedCOA}}).

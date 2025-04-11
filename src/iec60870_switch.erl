@@ -147,7 +147,7 @@ switch_loop(#state{
     ?SILENT_TIMEOUT ->
       ?LOGWARNING("~p entered silence timeout, reinitializing transport layer...", [Name]),
       NewState = restart_transport(State),
-      ?LOGINFO("~p successfully reinitialized after silence timeout", [Name]),
+      ?LOGINFO("~p successfully reinitialized after silence timeout!", [Name]),
       switch_loop(NewState)
   end.
 
