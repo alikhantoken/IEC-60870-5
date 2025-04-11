@@ -514,7 +514,7 @@ handle_packet(i, {SendCounter, ReceiveCounter, ASDU}, #state{
   Connection ! {asdu, self(), ASDU},
   NewState = start_t2(State),
   NewVR =
-    case VR > ?MAX_COUNTER of
+    case VR >= ?MAX_COUNTER of
       true ->
         ?LOGDEBUG("~p on port ~p resetting receive counter due to overflow, counter: ~p", [Type, Port, VR]),
         0;
