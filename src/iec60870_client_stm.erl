@@ -171,7 +171,7 @@ handle_event(
   info,
   {asdu, Connection, ASDU},
   _State,
-  #data{name = Name, connection = Connection, asdu = ASDUSettings, current_connection = CurrentConnection} = Data
+  #data{name = Name, connection = Connection, asdu = ASDUSettings, current_connection = CurrentConnection}
 ) ->
   try
     ParsedASDU = iec60870_asdu:parse(ASDU, ASDUSettings),
