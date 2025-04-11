@@ -273,20 +273,21 @@ wait_response(Response1, Response2, #state{
     {data, PortFT12, #frame{
       control_field = #control_field_response{function_code = ResponseCode}
     } = Response} when ResponseCode =:= Response1; ResponseCode =:= Response2 ->
-      % TODO: Diagnostic. ASDU
       {ok, Response};
     {data, PortFT12, #frame{control_field = #control_field_request{}} = Frame} when is_function(OnRequest) ->
       ?LOGDEBUG("link address ~p received request while waiting for response, request: ~p", [Address, Frame]),
       OnRequest(Frame),
       wait_response(Response1, Response2, State);
     {data, PortFT12, UnexpectedFrame} ->
-      % TODO: Diagnostic. PortFT12, UnexpectedFrame
       ?LOGWARNING("link address ~p received unexpected frame: ~p", [Address, UnexpectedFrame]),
       wait_response(Response1, Response2, State);
     {'EXIT', PortFT12, Reason} ->
+      ?LOGERROR("link address ~p received EXIT from ft12: ~p, reason: ~p", [Address, PortFT12, Reason]),
       exit({transport_layer_failure, Reason})
   after
-    Timeout -> error
+    Timeout ->
+      ?LOGERROR("link address ~p timeout: ~p ms!", [Address, Timeout]),
+      error
   end.
 
 %% Retrying to connect and executing user-function
