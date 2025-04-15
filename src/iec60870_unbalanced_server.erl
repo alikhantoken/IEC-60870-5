@@ -249,7 +249,7 @@ handle_request(RequestData, _UserData, #data{
           }
         }
     end,
-  ?LOGDEBUG("link address ~p received [DATA CLASS REQUEST], replying: ~p", [Name, Address, Response]),
+  ?LOGDEBUG("~p link address ~p received [DATA CLASS REQUEST], replying: ~p", [Name, Address, Response]),
   Data#data{
     sent_frame = send_response(Switch, Response)
   };
