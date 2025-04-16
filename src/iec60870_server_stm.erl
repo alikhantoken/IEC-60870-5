@@ -532,20 +532,23 @@ check_gi_termination(State) ->
 get_pointer_updates(NextPointer, #update_state{
   update_queue_ets = UpdateQueue
 } = State) ->
-  get_pointer_updates(ets:next(UpdateQueue, #order{pointer = NextPointer, ioa = -1, id = undefined}), NextPointer, State).
-
-get_pointer_updates(#order{pointer = NextPointer, ioa = IOA} = Order, NextPointer, #update_state{
+  InitialOrder = #order{pointer = NextPointer, ioa = -1, id = -1},
+  InitialKey = ets:next(UpdateQueue, InitialOrder),
+  get_pointer_updates(InitialKey, NextPointer, State).
+  
+get_pointer_updates(#order{pointer = NextPointer, ioa = IOA, id = UniqueID} = Order, NextPointer, #update_state{
   update_queue_ets = UpdateQueue,
   ioa_index = IndexIOA,
   storage = Storage
 } = State) ->
   ets:delete(UpdateQueue, Order),
-  ets:delete(IndexIOA, IOA),
+  ets:delete(IndexIOA, {IOA, UniqueID}),
+  NextKey = ets:next(UpdateQueue, Order),
   case ets:lookup(Storage, IOA) of
     [Update] ->
-      [Update | get_pointer_updates(ets:next(UpdateQueue, Order), NextPointer, State)];
+      [Update | get_pointer_updates(NextKey, NextPointer, State)];
     [] ->
-      get_pointer_updates(ets:next(UpdateQueue, Order), NextPointer, State)
+      get_pointer_updates(NextKey, NextPointer, State)
   end;
 get_pointer_updates(_NextKey, _NextPointer, _State) ->
   [].
@@ -612,7 +615,7 @@ enqueue_update(Priority, COT, {IOA, #{type := Type}}, #update_state{
   case ets:lookup(IndexIOA, IOA) of
     [] ->
       ets:insert(UpdateQueue, {Order, true}),
-      ets:insert(IndexIOA, {IOA, Order});
+      ets:insert(IndexIOA, {{IOA, UniqueID}, Order});
 
     [{_, #order{pointer = #pointer{priority = HasPriority}}}] when HasPriority < Priority, not MultipleAllowed ->
       ?LOGDEBUG("ignore update ioa: ~p, priority: ~p, has priority: ~p", [IOA, Priority, HasPriority]),
@@ -621,11 +624,11 @@ enqueue_update(Priority, COT, {IOA, #{type := Type}}, #update_state{
     [{_, PrevOrder}] when not MultipleAllowed ->
       ets:delete(UpdateQueue, PrevOrder),
       ets:insert(UpdateQueue, {Order, true}),
-      ets:insert(IndexIOA, {IOA, Order});
+      ets:insert(IndexIOA, {{IOA, UniqueID}, Order});
 
-    _ -> %% AllowMultiple = true case, always insert
+    _Other ->
       ets:insert(UpdateQueue, {Order, true}),
-      ets:insert(IndexIOA, {IOA, Order})
+      ets:insert(IndexIOA, {{IOA, UniqueID}, Order})
   end.
 
 build_termination(GroupID, ASDUSettings) ->
