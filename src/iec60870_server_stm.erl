@@ -66,6 +66,8 @@
   counter
 }).
 
+-define(ACCUMULATED_COTs, [?COT_SPONT]).
+
 -define(REMOTE_CONTROL_PRIORITY, 0).
 -define(COMMAND_PRIORITY, 1).
 -define(UPDATE_PRIORITY, 2).
@@ -591,11 +593,13 @@ enqueue_update(Priority, COT, {IOA, #{type := Type}}, #update_state{
   ioa_index = IndexIOA,
   update_queue_ets = UpdateQueue
 }) ->
+  MultipleAllowed = lists:member(COT, ?ACCUMULATED_COTs),
+
   UniqueID =
-    case COT of
-      ?COT_SPONT ->
+    case MultipleAllowed of
+      true ->
         erlang:unique_integer([monotonic, positive]);
-      _OtherCOT ->
+      false ->
         undefined
     end,
 
@@ -610,16 +614,16 @@ enqueue_update(Priority, COT, {IOA, #{type := Type}}, #update_state{
       ets:insert(UpdateQueue, {Order, true}),
       ets:insert(IndexIOA, {IOA, Order});
 
-    [{_, #order{pointer = #pointer{priority = HasPriority}}}] when HasPriority < Priority, COT =/= ?COT_SPONT ->
+    [{_, #order{pointer = #pointer{priority = HasPriority}}}] when HasPriority < Priority, not MultipleAllowed ->
       ?LOGDEBUG("ignore update ioa: ~p, priority: ~p, has priority: ~p", [IOA, Priority, HasPriority]),
       ignore;
 
-    [{_, PrevOrder}] when COT =/= ?COT_SPONT ->
+    [{_, PrevOrder}] when not MultipleAllowed ->
       ets:delete(UpdateQueue, PrevOrder),
       ets:insert(UpdateQueue, {Order, true}),
       ets:insert(IndexIOA, {IOA, Order});
 
-    _Other ->
+    _ -> %% AllowMultiple = true case, always insert
       ets:insert(UpdateQueue, {Order, true}),
       ets:insert(IndexIOA, {IOA, Order})
   end.
