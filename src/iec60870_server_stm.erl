@@ -471,7 +471,7 @@ update_queue(#update_state{
 %%% +--------------------------------------------------------------+
 
 -record(pointer, {priority, cot, type}).
--record(order, {pointer, ioa}).
+-record(order, {pointer, ioa, id}).
 
 check_tickets(#update_state{
   tickets = Tickets
@@ -530,7 +530,7 @@ check_gi_termination(State) ->
 get_pointer_updates(NextPointer, #update_state{
   update_queue_ets = UpdateQueue
 } = State) ->
-  get_pointer_updates(ets:next(UpdateQueue, #order{pointer = NextPointer, ioa = -1}), NextPointer, State).
+  get_pointer_updates(ets:next(UpdateQueue, #order{pointer = NextPointer, ioa = -1, id = undefined}), NextPointer, State).
 
 get_pointer_updates(#order{pointer = NextPointer, ioa = IOA} = Order, NextPointer, #update_state{
   update_queue_ets = UpdateQueue,
@@ -591,22 +591,35 @@ enqueue_update(Priority, COT, {IOA, #{type := Type}}, #update_state{
   ioa_index = IndexIOA,
   update_queue_ets = UpdateQueue
 }) ->
+  UniqueID =
+    case COT of
+      ?COT_SPONT ->
+        erlang:unique_integer([monotonic, positive]);
+      _OtherCOT ->
+        undefined
+    end,
+
   Order = #order{
     pointer = #pointer{priority = Priority, cot = COT, type = Type},
-    ioa = IOA
+    ioa = IOA,
+    id = UniqueID
   },
+
   case ets:lookup(IndexIOA, IOA) of
     [] ->
-      ?LOGDEBUG("ioa: ~p, priority: ~p",[ IOA, Priority ]),
       ets:insert(UpdateQueue, {Order, true}),
       ets:insert(IndexIOA, {IOA, Order});
-    [{_, #order{pointer = #pointer{priority = HasPriority}}}] when HasPriority < Priority ->
-      % We cannot lower the existing priority
-      ?LOGDEBUG("ignore update ioa: ~p, priority: ~p, has prority: ~p",[ IOA, Priority, HasPriority ]),
+
+    [{_, #order{pointer = #pointer{priority = HasPriority}}}] when HasPriority < Priority, COT =/= ?COT_SPONT ->
+      ?LOGDEBUG("ignore update ioa: ~p, priority: ~p, has priority: ~p", [IOA, Priority, HasPriority]),
       ignore;
-    [{ _, PrevOrder}] ->
-      ?LOGDEBUG("ioa: ~p, priority: ~p, previous order: ~p",[ IOA, Priority, PrevOrder ]),
+
+    [{_, PrevOrder}] when COT =/= ?COT_SPONT ->
       ets:delete(UpdateQueue, PrevOrder),
+      ets:insert(UpdateQueue, {Order, true}),
+      ets:insert(IndexIOA, {IOA, Order});
+
+    _Other ->
       ets:insert(UpdateQueue, {Order, true}),
       ets:insert(IndexIOA, {IOA, Order})
   end.
