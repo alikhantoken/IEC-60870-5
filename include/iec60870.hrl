@@ -118,6 +118,14 @@
 -define(MAX_ORG_BYTES, 1).
 -define(MIN_ORG_BYTES, 0).
 
+-define(REMOTE_CONTROL_PRIORITY, 0).
+-define(COMMAND_PRIORITY, 1).
+-define(UPDATE_PRIORITY, 2).
+
+-define(GLOBAL_GROUP, 0).
+-define(START_GROUP, 1).
+-define(END_GROUP, 16).
+
 -define(COMPATIBLE_IO_MAPPING, #{
     ?M_SP_TA_1 => ?M_SP_NA_1,  %  2 => 1
     ?M_SP_TB_1 => ?M_SP_NA_1,  % 30 => 1
