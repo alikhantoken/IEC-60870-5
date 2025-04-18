@@ -74,6 +74,8 @@
 -define(START_GROUP, 1).
 -define(END_GROUP, 16).
 
+-define(START_OF_TABLE, -1).
+
 -define(ESUBSCRIBE_DELAY, 100).
 
 %% States
@@ -340,8 +342,9 @@ build_asdu(Type, COT, PN, Objects, Settings) ->
   owner,
   name,
   tickets,
-  update_queue_ets,
-  ioa_index,
+  update_ets,
+  index_ets,
+  history_ets,
   send_queue_pid,
   asdu_settings,
   pointer,
@@ -354,12 +357,16 @@ start_link_update_queue(Name, Storage, SendQueue, ASDUSettings) ->
   {ok, spawn_link(
     fun() ->
       esubscribe:subscribe(Name, update, self()),
-      UpdateQueue = ets:new(update_queue, [
+      Index = ets:new(index, [
+        set,
+        private
+      ]),
+      UpdateSet = ets:new(updates, [
         ordered_set,
         private
       ]),
-      IndexIOA = ets:new(io_index, [
-        set,
+      HistoryBag = ets:new(history, [
+        bag,
         private
       ]),
       ?LOGINFO("~p starting update queue...", [Name]),
@@ -367,11 +374,12 @@ start_link_update_queue(Name, Storage, SendQueue, ASDUSettings) ->
         owner = Owner,
         name = Name,
         storage = Storage,
-        update_queue_ets = UpdateQueue,
-        ioa_index = IndexIOA,
+        index_ets = Index,
+        update_ets = UpdateSet,
+        history_ets = HistoryBag,
         send_queue_pid = SendQueue,
         asdu_settings = ASDUSettings,
-        pointer = ets:first(UpdateQueue),
+        pointer = ets:first(UpdateSet),
         tickets = #{},
         group = undefined
       })
@@ -492,7 +500,7 @@ check_tickets(InState) ->
 
 next_queue(#update_state{
   pointer = '$end_of_table',
-  update_queue_ets = UpdateQueue
+  update_ets = UpdateQueue
 }) ->
   case ets:first(UpdateQueue) of
     #order{pointer = Pointer} -> Pointer;
@@ -500,7 +508,7 @@ next_queue(#update_state{
   end;
 next_queue(#update_state{
   pointer = #pointer{} = Pointer,
-  update_queue_ets = UpdateQueue
+  update_ets = UpdateQueue
 } = State) ->
   case ets:next(UpdateQueue, #order{pointer = Pointer, ioa = max_ioa}) of
     #order{pointer = NextPointer} ->
@@ -528,22 +536,30 @@ check_gi_termination(State) ->
   State.
 
 get_pointer_updates(NextPointer, #update_state{
-  update_queue_ets = UpdateQueue
+  update_ets = UpdateSet
 } = State) ->
-  get_pointer_updates(ets:next(UpdateQueue, #order{pointer = NextPointer, ioa = -1}), NextPointer, State).
+  InitialOrder = #order{pointer = NextPointer, ioa = ?START_OF_TABLE},
+  InitialKey = ets:next(UpdateSet, InitialOrder),
+  get_pointer_updates(InitialKey, NextPointer, State).
 
 get_pointer_updates(#order{pointer = NextPointer, ioa = IOA} = Order, NextPointer, #update_state{
-  update_queue_ets = UpdateQueue,
-  ioa_index = IndexIOA,
+  update_ets = UpdateSet,
+  history_ets = HistoryBag,
+  index_ets = Index,
   storage = Storage
 } = State) ->
-  ets:delete(UpdateQueue, Order),
-  ets:delete(IndexIOA, IOA),
+  ets:delete(UpdateSet, Order),
+  ets:delete(Index, IOA),
+  NextOrder = ets:next(UpdateSet, Order),
+  HistoryUpdates = lists:sort(
+    fun(#{accept_ts := TSa}, #{accept_ts := TSb}) -> TSa < TSb end,
+    ets:take(HistoryBag, IOA)
+  ),
   case ets:lookup(Storage, IOA) of
     [Update] ->
-      [Update | get_pointer_updates(ets:next(UpdateQueue, Order), NextPointer, State)];
+      lists:flatten([Update, HistoryUpdates | get_pointer_updates(NextOrder, NextPointer, State)]);
     [] ->
-      get_pointer_updates(ets:next(UpdateQueue, Order), NextPointer, State)
+      get_pointer_updates(NextOrder, NextPointer, State)
   end;
 get_pointer_updates(_NextKey, _NextPointer, _State) ->
   [].
@@ -587,28 +603,34 @@ send_update(SendQueue, Priority, ASDU) ->
   SendQueue ! {send_confirm, self(), Priority, ASDU},
   receive {accepted, TicketRef} -> TicketRef end.
 
-enqueue_update(Priority, COT, {IOA, #{type := Type}}, #update_state{
-  ioa_index = IndexIOA,
-  update_queue_ets = UpdateQueue
+enqueue_update(Priority, COT, {IOA, #{type := Type} = DataObject}, #update_state{
+  index_ets = Index,
+  update_ets = UpdateSet
 }) ->
   Order = #order{
     pointer = #pointer{priority = Priority, cot = COT, type = Type},
     ioa = IOA
   },
-  case ets:lookup(IndexIOA, IOA) of
+  case DataObject of
+    #{ts := _Timestamp} ->
+      ets:insert(UpdateSet, {IOA, DataObject});
+    _NoTS ->
+      ignore
+  end,
+  case ets:lookup(Index, IOA) of
     [] ->
       ?LOGDEBUG("ioa: ~p, priority: ~p",[ IOA, Priority ]),
-      ets:insert(UpdateQueue, {Order, true}),
-      ets:insert(IndexIOA, {IOA, Order});
+      ets:insert(UpdateSet, {Order, true}),
+      ets:insert(Index, {IOA, Order});
     [{_, #order{pointer = #pointer{priority = HasPriority}}}] when HasPriority < Priority ->
       % We cannot lower the existing priority
       ?LOGDEBUG("ignore update ioa: ~p, priority: ~p, has prority: ~p",[ IOA, Priority, HasPriority ]),
       ignore;
     [{ _, PrevOrder}] ->
       ?LOGDEBUG("ioa: ~p, priority: ~p, previous order: ~p",[ IOA, Priority, PrevOrder ]),
-      ets:delete(UpdateQueue, PrevOrder),
-      ets:insert(UpdateQueue, {Order, true}),
-      ets:insert(IndexIOA, {IOA, Order})
+      ets:delete(UpdateSet, PrevOrder),
+      ets:insert(UpdateSet, {Order, true}),
+      ets:insert(Index, {IOA, Order})
   end.
 
 build_termination(GroupID, ASDUSettings) ->
