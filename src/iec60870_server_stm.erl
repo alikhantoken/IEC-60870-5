@@ -603,7 +603,7 @@ send_update(SendQueue, Priority, ASDU) ->
   SendQueue ! {send_confirm, self(), Priority, ASDU},
   receive {accepted, TicketRef} -> TicketRef end.
 
-enqueue_update(Priority, COT, {IOA, #{type := Type} = DataObject}, #update_state{
+enqueue_update(Priority, COT, {IOA, #{type := Type} = DataObject} = Update, #update_state{
   index_ets = Index,
   update_ets = UpdateSet
 }) ->
@@ -613,7 +613,7 @@ enqueue_update(Priority, COT, {IOA, #{type := Type} = DataObject}, #update_state
   },
   case DataObject of
     #{ts := _Timestamp} ->
-      ets:insert(UpdateSet, {IOA, DataObject});
+      ets:insert(UpdateSet, {IOA, Update});
     _NoTS ->
       ignore
   end,
