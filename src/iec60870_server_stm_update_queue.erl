@@ -285,8 +285,6 @@ send_updates(Updates, #pointer{
   asdu_settings = ASDUSettings,
   send_queue_pid = SendQueuePID
 } = State) ->
-  ?LOGINFO("DEBUG > updates: ~p", [Updates]),
-  ?LOGINFO("DEBUG > type: ~p", [Type]),
   ListASDU = iec60870_asdu:build(#asdu{
     type = Type,
     cot = COT,
