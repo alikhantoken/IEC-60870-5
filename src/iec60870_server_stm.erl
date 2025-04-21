@@ -540,7 +540,7 @@ get_pointer_updates(NextPointer, #update_state{
 } = State) ->
   InitialOrder = #order{pointer = NextPointer, ioa = ?START_OF_TABLE},
   InitialKey = ets:next(UpdateSet, InitialOrder),
-  get_pointer_updates(InitialKey, NextPointer, State).
+  lists:append(get_pointer_updates(InitialKey, NextPointer, State)).
 
 get_pointer_updates(#order{pointer = NextPointer, ioa = IOA} = Order, NextPointer, #update_state{
   update_ets = UpdateSet,
@@ -555,12 +555,12 @@ get_pointer_updates(#order{pointer = NextPointer, ioa = IOA} = Order, NextPointe
     fun(#{accept_ts := TSa}, #{accept_ts := TSb}) -> TSa < TSb end,
     ets:take(HistoryBag, IOA)
   ),
-  case ets:lookup(Storage, IOA) of
-    [Update] ->
-      lists:flatten([Update, HistoryUpdates | get_pointer_updates(NextOrder, NextPointer, State)]);
-    [] ->
-      get_pointer_updates(NextOrder, NextPointer, State)
-  end;
+  PointerUpdates =
+    case ets:lookup(Storage, IOA) of
+      [Update] ->[Update| HistoryUpdates];
+      _-> HistoryUpdates
+    end,
+  [PointerUpdates|get_pointer_updates(NextOrder, NextPointer, State)];
 get_pointer_updates(_NextKey, _NextPointer, _State) ->
   [].
 
