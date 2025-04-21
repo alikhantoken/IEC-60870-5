@@ -46,7 +46,7 @@ start_link(Name, Connection) ->
         private
       ]),
       ?LOGINFO("~p starting send queue...", [Name]),
-      send_queue(#state{
+      loop(#state{
         owner = Owner,
         name = Name,
         send_queue = SendQueue,
@@ -56,7 +56,7 @@ start_link(Name, Connection) ->
       })
     end)}.
 
-send_queue(#state{
+loop(#state{
   send_queue = SendQueue,
   name = Name,
   tickets = Tickets,
@@ -79,7 +79,7 @@ send_queue(#state{
         InState
     end,
   OutState = check_send_queue(State),
-  send_queue(OutState).
+  loop(OutState).
 
 check_send_queue(#state{
   send_queue = SendQueue,

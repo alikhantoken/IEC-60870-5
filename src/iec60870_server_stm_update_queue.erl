@@ -27,7 +27,7 @@
   tickets,
   update_queue_ets,
   index_ets,
-  history_ets,
+  history_queue_ets,
   send_queue_pid,
   asdu_settings,
   pointer,
@@ -72,13 +72,13 @@ start_link(Name, Storage, SendQueue, ASDUSettings) ->
         private
       ]),
       ?LOGINFO("~p starting update queue...", [Name]),
-      update_queue_ets(#state{
+      loop(#state{
         owner = Owner,
         name = Name,
         storage = Storage,
         index_ets = Index,
         update_queue_ets = UpdateQueueSet,
-        history_ets = HistoryBag,
+        history_queue_ets = HistoryBag,
         send_queue_pid = SendQueue,
         asdu_settings = ASDUSettings,
         pointer = ets:first(UpdateQueueSet),
@@ -87,7 +87,7 @@ start_link(Name, Storage, SendQueue, ASDUSettings) ->
       })
     end)}.
 
-update_queue_ets(#state{
+loop(#state{
   name = Name,
   owner = Owner,
   tickets = Tickets,
@@ -174,7 +174,7 @@ update_queue_ets(#state{
         InState
     end,
   OutState = check_tickets(State),
-  update_queue_ets(OutState).
+  loop(OutState).
 
 %%% +--------------------------------------------------------------+
 %%% |                      Helper functions                        |
@@ -182,6 +182,7 @@ update_queue_ets(#state{
 
 enqueue_update(Priority, COT, {IOA, #{type := Type} = DataObject} = Update, #state{
   index_ets = Index,
+  history_queue_ets = HistoryQueueBag,
   update_queue_ets = UpdateQueueSet
 }) ->
   Order = #order{
@@ -190,7 +191,7 @@ enqueue_update(Priority, COT, {IOA, #{type := Type} = DataObject} = Update, #sta
   },
   case DataObject of
     #{ts := _Timestamp} ->
-      ets:insert(UpdateQueueSet, {IOA, Update});
+      ets:insert(HistoryQueueBag, {IOA, Update});
     _NoTS ->
       ignore
   end,
@@ -235,7 +236,7 @@ get_pointer_updates(NextPointer, #state{
   lists:append(get_pointer_updates(InitialKey, NextPointer, State)).
 get_pointer_updates(#order{pointer = NextPointer, ioa = IOA} = Order, NextPointer, #state{
   update_queue_ets = UpdateQueueSet,
-  history_ets = HistoryBag,
+  history_queue_ets = HistoryQueueBag,
   index_ets = Index,
   storage = Storage
 } = State) ->
@@ -244,7 +245,7 @@ get_pointer_updates(#order{pointer = NextPointer, ioa = IOA} = Order, NextPointe
   NextOrder = ets:next(UpdateQueueSet, Order),
   HistoryUpdates = lists:sort(
     fun(#{accept_ts := TSa}, #{accept_ts := TSb}) -> TSa < TSb end,
-    ets:take(HistoryBag, IOA)
+    [HistoryUpdate || {_, HistoryUpdate} <- ets:take(HistoryQueueBag, IOA)]
   ),
   PointerUpdates =
     case ets:lookup(Storage, IOA) of
@@ -284,6 +285,8 @@ send_updates(Updates, #pointer{
   asdu_settings = ASDUSettings,
   send_queue_pid = SendQueuePID
 } = State) ->
+  ?LOGINFO("DEBUG > updates: ~p", [Updates]),
+  ?LOGINFO("DEBUG > type: ~p", [Type]),
   ListASDU = iec60870_asdu:build(#asdu{
     type = Type,
     cot = COT,
