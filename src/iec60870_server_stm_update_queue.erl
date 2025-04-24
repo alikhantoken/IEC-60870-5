@@ -180,7 +180,7 @@ loop(#state{
 %%% |                      Helper functions                        |
 %%% +--------------------------------------------------------------+
 
-enqueue_update(Priority, COT, {IOA, #{type := Type} = DataObject} = Update, #state{
+enqueue_update(Priority, COT, {IOA, #{type := Type} = DataObject}, #state{
   index_ets = Index,
   history_queue_ets = HistoryQueueBag,
   update_queue_ets = UpdateQueueSet
@@ -191,7 +191,7 @@ enqueue_update(Priority, COT, {IOA, #{type := Type} = DataObject} = Update, #sta
   },
   case DataObject of
     #{ts := _Timestamp} ->
-      ets:insert(HistoryQueueBag, {IOA, Update});
+      ets:insert(HistoryQueueBag, {IOA, DataObject});
     _NoTS ->
       ignore
   end,
@@ -244,8 +244,8 @@ get_pointer_updates(#order{pointer = NextPointer, ioa = IOA} = Order, NextPointe
   ets:delete(Index, IOA),
   NextOrder = ets:next(UpdateQueueSet, Order),
   HistoryUpdates = lists:sort(
-    fun(#{accept_ts := TSa}, #{accept_ts := TSb}) -> TSa < TSb end,
-    [HistoryUpdate || {_, HistoryUpdate} <- ets:take(HistoryQueueBag, IOA)]
+    fun({_, #{accept_ts := TSa}}, {_, #{accept_ts := TSb}}) -> TSa < TSb end,
+    ets:take(HistoryQueueBag, IOA)
   ),
   PointerUpdates =
     case ets:lookup(Storage, IOA) of
