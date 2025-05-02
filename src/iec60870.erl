@@ -13,6 +13,7 @@
 -export([
   start_server/1,
   start_client/1,
+  connections_count/1,
   stop/1,
   subscribe/2, subscribe/3,
   unsubscribe/2, unsubscribe/3,
@@ -26,6 +27,9 @@ start_server(ConnectionSettings) ->
 
 start_client(ConnectionSettings) ->
   iec60870_client:start(ConnectionSettings).
+  
+connections_count(Server) ->
+  iec60870_server:connection_count(Server).
 
 stop(ClientOrServer) ->
   Module = element(1, ClientOrServer),

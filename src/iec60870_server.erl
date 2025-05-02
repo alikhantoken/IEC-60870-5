@@ -20,6 +20,7 @@
   write/3,
   subscribe/3, subscribe/2,
   unsubscribe/3, unsubscribe/2,
+  connection_count/1,
   get_pid/1
 ]).
 
@@ -49,6 +50,7 @@
   name,
   module,
   esubscribe,
+  connections,
   connection_settings
 }).
 
@@ -131,6 +133,16 @@ unsubscribe(Ref, PID) when is_pid(PID) ->
   unsubscribe(Ref, AddressList);
 unsubscribe(_, _) ->
   throw(bad_arg).
+
+connection_count(#?MODULE{pid = PID}) ->
+  erlang:monitor(process, PID),
+  PID ! {get_connections, self()},
+  receive
+    {'DOWN', _, process, _, Reason} ->
+      throw({no_proc, Reason});
+    {connections, Connections} ->
+      Connections
+  end.
 
 get_pid(#?MODULE{pid = PID}) ->
   PID;
@@ -227,6 +239,7 @@ init_server(Owner, #{
     type = Type,
     name = Name,
     esubscribe = EsubscribePID,
+    connections = 0,
     connection_settings = ConnectionSettings
   }).
 
@@ -235,22 +248,32 @@ await_connection(#state{
   server = Server,
   type = Type,
   name = Name,
+  connections = Connections,
   connection_settings = ConnectionSettings
 } = State) ->
   receive
     {start_connection, Server, From, Connection} ->
-      case gen_statem:start(iec60870_server_stm, {_Root = self(), Connection, ConnectionSettings}, []) of
-        {ok, PID} ->
-          From ! {self(), PID};
-        {error, Error} ->
-          ?LOGERROR("~p of type ~p failed to start process for incoming connection, error: ~p", [Name, Type, Error]),
-          From ! {self(), error}
-      end,
+      NewConnections =
+        case gen_statem:start(iec60870_server_stm, {_Root = self(), Connection, ConnectionSettings}, []) of
+          {ok, PID} ->
+            erlang:monitor(process, PID),
+            From ! {self(), PID},
+            Connections + 1;
+          {error, Error} ->
+            ?LOGERROR("~p of type ~p failed to start process for incoming connection, error: ~p", [Name, Type, Error]),
+            From ! {self(), error},
+            Connections
+        end,
+      await_connection(State#state{connections = NewConnections});
+    {get_connections, PID} ->
+      PID ! {connections, Connections},
       await_connection(State);
     {'EXIT', _PID, Reason} ->
       ?LOGERROR("~p of type ~p terminating w/ reason: ~p", [Name, Type, Reason]),
       catch Module:stop_server(Server),
       exit(Reason);
+    {'DOWN', _, process, _, _Reason} ->
+      await_connection(State#state{connections = Connections - 1});
     Unexpected ->
       ?LOGWARNING("~p of type ~p received unexpected message: ~p", [Name, Type, Unexpected]),
       await_connection(State)
