@@ -243,10 +243,13 @@ get_pointer_updates(#order{pointer = NextPointer, ioa = IOA} = Order, NextPointe
   ets:delete(UpdateQueueSet, Order),
   ets:delete(Index, IOA),
   NextOrder = ets:next(UpdateQueueSet, Order),
-  HistoryUpdates = lists:sort(
-    fun({_, #{accept_ts := TSa}}, {_, #{accept_ts := TSb}}) -> TSa < TSb end,
-    ets:take(HistoryQueueBag, IOA)
-  ),
+  HistoryUpdates =
+    lists:sort(
+      fun({_, #{accept_ts := AcceptTSa, ts := TSa}}, {_, #{accept_ts := AcceptTSb, ts := TSb}}) ->
+        AcceptTSa < AcceptTSb orelse (AcceptTSa =:= AcceptTSb andalso TSa < TSb)
+      end,
+      ets:take(HistoryQueueBag, IOA)
+    ),
   PointerUpdates =
     case ets:lookup(Storage, IOA) of
       [Update] -> [Update | HistoryUpdates];
