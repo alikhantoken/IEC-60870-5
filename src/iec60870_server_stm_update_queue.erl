@@ -251,9 +251,14 @@ get_pointer_updates(#order{pointer = NextPointer, ioa = IOA} = Order, NextPointe
       ets:take(HistoryQueueBag, IOA)
     ),
   PointerUpdates =
-    case ets:lookup(Storage, IOA) of
-      [Update] -> [Update | HistoryUpdates];
-      _NoUpdate -> HistoryUpdates
+    case length(HistoryUpdates) =:= 0 of
+      true ->
+        case ets:lookup(Storage, IOA) of
+          [Update] -> [Update];
+          [] -> []
+        end;
+      false ->
+        HistoryUpdates
     end,
   [PointerUpdates | get_pointer_updates(NextOrder, NextPointer, State)];
 get_pointer_updates(_NextKey, _NextPointer, _State) ->
