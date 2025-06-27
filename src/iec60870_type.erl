@@ -593,7 +593,7 @@ parse_cp56(InvalidTimestamp) ->
 get_cp16(Value) when is_integer(Value) ->
   Value;
 get_cp16(Anything) ->
-  ?LOGWARNING("received invalid CP16: ~p", [Anything]),
+  ?LOGDEBUG("received invalid CP16: ~p", [Anything]),
   get_cp16(0).
 
 get_cp24(TotalMillis) when is_integer(TotalMillis) ->
@@ -614,7 +614,7 @@ get_cp24(TotalMillis) when is_integer(TotalMillis) ->
       undefined
   end;
 get_cp24(Anything) ->
-  ?LOGWARNING("received invalid CP24 timestamp: ~p", [Anything]),
+  ?LOGDEBUG("received invalid CP24 timestamp: ~p", [Anything]),
   get_cp24(0).
 
 get_cp56(PosixTimestamp) when is_integer(PosixTimestamp) ->
@@ -642,7 +642,7 @@ get_cp56(PosixTimestamp) when is_integer(PosixTimestamp) ->
       undefined
   end;
 get_cp56(Anything) ->
-  ?LOGWARNING("received invalid CP56 timestamp: ~p", [Anything]),
+  ?LOGDEBUG("received invalid CP56 timestamp: ~p", [Anything]),
   get_cp56(erlang:system_time(millisecond)).
 
 millis_to_seconds(Millis) -> Millis div 1000.
