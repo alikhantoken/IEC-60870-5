@@ -17,7 +17,7 @@
   objects
 }).
 
--define(DEFAULT_ASDU_SETTINGS,#{
+-define(DEFAULT_ASDU_SETTINGS, #{
   coa => 1,
   org => 0,
   coa_size => 2,
@@ -25,6 +25,7 @@
   ioa_size => 3
 }).
 
+%% Positive OR Negative Flag of ASDU Header
 -define(POSITIVE_PN, 0).
 -define(NEGATIVE_PN, 1).
 

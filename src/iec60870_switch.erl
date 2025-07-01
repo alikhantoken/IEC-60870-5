@@ -7,7 +7,7 @@
 -module(iec60870_switch).
 
 -include("iec60870.hrl").
--include("ft12.hrl").
+-include("iec60870_ft12.hrl").
 
 %%% +--------------------------------------------------------------+
 %%% |                             API                              |

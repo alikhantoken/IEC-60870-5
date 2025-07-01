@@ -8,7 +8,7 @@
 -behaviour(gen_statem).
 
 -include("iec60870.hrl").
--include("asdu.hrl").
+-include("iec60870_asdu.hrl").
 
 %%% +--------------------------------------------------------------+
 %%% |                     Server Process Tree                      |

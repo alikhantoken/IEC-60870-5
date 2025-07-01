@@ -7,8 +7,8 @@
 -module(iec60870_balanced).
 
 -include("iec60870.hrl").
--include("ft12.hrl").
--include("function_codes.hrl").
+-include("iec60870_ft12.hrl").
+-include("iec60870_function_codes.hrl").
 
 %%% +--------------------------------------------------------------+
 %%% |                            API                               |

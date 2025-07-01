@@ -1,14 +1,14 @@
-%%% +----------------------------------------------------------------+
-%%% | Copyright (c) 2024. Tokenov Alikhan, alikhantokenov@gmail.com  |
-%%% | All rights reserved.                                           |
-%%% | License can be found in the LICENSE file.                      |
-%%% +----------------------------------------------------------------+
+%%% +--------------------------------------------------------------+
+%%% | Copyright (c) 2025. All Rights Reserved.                     |
+%%% | License can be found in the LICENSE file.                    |
+%%% | Author: Tokenov Alikhan, alikhantokenov@gmail.com            |
+%%% +--------------------------------------------------------------+
 
 -module(iec60870_101).
 
 -include("iec60870.hrl").
--include("ft12.hrl").
--include("function_codes.hrl").
+-include("iec60870_ft12.hrl").
+-include("iec60870_function_codes.hrl").
 
 %%% +--------------------------------------------------------------+
 %%% |                       Server & Client API                    |

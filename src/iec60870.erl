@@ -1,24 +1,33 @@
-%%% +----------------------------------------------------------------+
-%%% | Copyright (c) 2024. Tokenov Alikhan, alikhantokenov@gmail.com  |
-%%% | All rights reserved.                                           |
-%%% | License can be found in the LICENSE file.                      |
-%%% +----------------------------------------------------------------+
+%%% +--------------------------------------------------------------+
+%%% | Copyright (c) 2025. All Rights Reserved.                     |
+%%% | License can be found in the LICENSE file.                    |
+%%% | Author: Tokenov Alikhan, alikhantokenov@gmail.com            |
+%%% +--------------------------------------------------------------+
 
 -module(iec60870).
 
 %%% +--------------------------------------------------------------+
-%%% |                         Application API                      |
+%%% |                            API                               |
 %%% +--------------------------------------------------------------+
 
+%% Application-level
 -export([
   start_server/1,
   start_client/1,
-  stop/1,
+  stop/1
+]).
+
+%% Operations
+-export([
   subscribe/2, subscribe/3,
   unsubscribe/2, unsubscribe/3,
   read/1, read/2,
-  get_pid/1,
   write/3
+]).
+
+%% Utilities
+-export([
+  get_pid/1
 ]).
 
 start_server(ConnectionSettings) ->

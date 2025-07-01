@@ -6,7 +6,7 @@
 
 -module(iec60870_server_stm_update_queue).
 -include("iec60870.hrl").
--include("asdu.hrl").
+-include("iec60870_asdu.hrl").
 
 -export([start_link/4]).
 

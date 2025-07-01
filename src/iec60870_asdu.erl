@@ -1,13 +1,13 @@
-%%% +----------------------------------------------------------------+
-%%% | Copyright (c) 2024. Tokenov Alikhan, alikhantokenov@gmail.com  |
-%%% | All rights reserved.                                           |
-%%% | License can be found in the LICENSE file.                      |
-%%% +----------------------------------------------------------------+
+%%% +--------------------------------------------------------------+
+%%% | Copyright (c) 2025. All Rights Reserved.                     |
+%%% | License can be found in the LICENSE file.                    |
+%%% | Author: Tokenov Alikhan, alikhantokenov@gmail.com            |
+%%% +--------------------------------------------------------------+
 
 -module(iec60870_asdu).
 
 -include("iec60870.hrl").
--include("asdu.hrl").
+-include("iec60870_asdu.hrl").
 
 %%% +--------------------------------------------------------------+
 %%% |                            API                               |

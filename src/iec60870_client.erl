@@ -7,7 +7,7 @@
 -module(iec60870_client).
 
 -include("iec60870.hrl").
--include("asdu.hrl").
+-include("iec60870_asdu.hrl").
 
 %%% +--------------------------------------------------------------+
 %%% |                       Macros & Records                       |

@@ -1,13 +1,13 @@
-%%% +----------------------------------------------------------------+
-%%% | Copyright (c) 2024. Tokenov Alikhan, alikhantokenov@gmail.com  |
-%%% | All rights reserved.                                           |
-%%% | License can be found in the LICENSE file.                      |
-%%% +----------------------------------------------------------------+
+%%% +--------------------------------------------------------------+
+%%% | Copyright (c) 2025. All Rights Reserved.                     |
+%%% | License can be found in the LICENSE file.                    |
+%%% | Author: Tokenov Alikhan, alikhantokenov@gmail.com            |
+%%% +--------------------------------------------------------------+
 
 -module(iec60870_type).
 
 -include("iec60870.hrl").
--include("asdu.hrl").
+-include("iec60870_asdu.hrl").
 
 %%% +--------------------------------------------------------------+
 %%% |                             API                              |
@@ -22,11 +22,16 @@
 %%% |                       Macros & Records                       |
 %%% +--------------------------------------------------------------+
 
+-define(CURRENT_MILLENNIUM, 2000).
+
 -define(MILLIS_IN_SECOND, 1000).
 -define(MILLIS_IN_MINUTE, 60000).
+
 -define(UNIX_EPOCH_DATE, {1970, 1, 1}).
 -define(UNIX_EPOCH_SECONDS, 62167219200).
--define(CURRENT_MILLENNIUM, 2000).
+
+-define(SIQ_BITMASK, 2#11111110).
+-define(DIQ_BITMASK, 2#11111100).
 
 %%% +--------------------------------------------------------------+
 %%% |                           Parsing                            |
@@ -35,22 +40,22 @@
 %% Type 1. Single point information
 parse_information_element(?M_SP_NA_1, <<SIQ>>) ->
   <<_Ignore:7, SPI:1>> = <<SIQ>>,
-  #{value => SPI, siq => SIQ};
+  #{value => SPI, siq => SIQ, qds => (SIQ band ?SIQ_BITMASK)};
 
 %% Type 2. Single point information with time tag
 parse_information_element(?M_SP_TA_1, <<SIQ, Timestamp/binary>>) ->
   <<_Ignore:7, SPI:1>> = <<SIQ>>,
-  #{value => SPI, siq => SIQ, ts => parse_cp24(Timestamp)};
+  #{value => SPI, siq => SIQ, qds => (SIQ band ?SIQ_BITMASK), ts => parse_cp24(Timestamp)};
 
 %% Type 3. Double point information
 parse_information_element(?M_DP_NA_1, <<DIQ>>) ->
   <<_Ignore:6, DPI:2>> = <<DIQ>>,
-  #{value => DPI, diq => DIQ};
+  #{value => DPI, diq => DIQ, qds => (DIQ band ?DIQ_BITMASK)};
 
 %% Type 4. Double point information with time tag
 parse_information_element(?M_DP_TA_1, <<DIQ, Timestamp/binary>>) ->
   <<_Ignore:6, DPI:2>> = <<DIQ>>,
-  #{value => DPI, diq => DIQ, ts => parse_cp24(Timestamp)};
+  #{value => DPI, diq => DIQ, qds => (DIQ band ?DIQ_BITMASK), ts => parse_cp24(Timestamp)};
 
 %% Type 5. Step position information
 parse_information_element(?M_ST_NA_1, <<VTI, QDS>>) ->
@@ -592,8 +597,7 @@ parse_cp56(InvalidTimestamp) ->
 
 get_cp16(Value) when is_integer(Value) ->
   Value;
-get_cp16(Anything) ->
-  ?LOGDEBUG("received invalid CP16: ~p", [Anything]),
+get_cp16(_Anything) ->
   get_cp16(0).
 
 get_cp24(TotalMillis) when is_integer(TotalMillis) ->
@@ -613,8 +617,7 @@ get_cp24(TotalMillis) when is_integer(TotalMillis) ->
       ?LOGERROR("failed to build CP24, error: ~p, timestamp: ~p", [Error, TotalMillis]),
       undefined
   end;
-get_cp24(Anything) ->
-  ?LOGDEBUG("received invalid CP24 timestamp: ~p", [Anything]),
+get_cp24(_Anything) ->
   get_cp24(0).
 
 get_cp56(PosixTimestamp) when is_integer(PosixTimestamp) ->
@@ -641,20 +644,18 @@ get_cp56(PosixTimestamp) when is_integer(PosixTimestamp) ->
       ?LOGERROR("failed to build CP56, error: ~p, timestamp: ~p", [Error, PosixTimestamp]),
       undefined
   end;
-get_cp56(Anything) ->
-  ?LOGDEBUG("received invalid CP56 timestamp: ~p", [Anything]),
+get_cp56(_Anything) ->
   get_cp56(erlang:system_time(millisecond)).
 
 millis_to_seconds(Millis) -> Millis div 1000.
 seconds_to_millis(Seconds) -> Seconds * 1000.
 
--define(SHORT_INT_MIN_VALUE, -32768).
--define(SHORT_INT_MAX_VALUE, 32767).
-
 %%% +--------------------------------------------------------------+
 %%% |                   NVA parsing and building                   |
 %%% +--------------------------------------------------------------+
 
+-define(SHORT_INT_MIN_VALUE, -32768).
+-define(SHORT_INT_MAX_VALUE, 32767).
 %% Range = Short Int Max - Short Int Min
 -define(DELTA_X, 65535).
 
