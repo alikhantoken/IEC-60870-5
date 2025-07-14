@@ -133,12 +133,12 @@ parse_information_element(?M_ME_ND_1, <<NVA:16/little-signed>>) ->
 %% Type 30. Single point information with time tag
 parse_information_element(?M_SP_TB_1, <<SIQ, Timestamp/binary>>) ->
   <<_Ignore:7, SPI:1>> = <<SIQ>>,
-  #{value => SPI, siq => SIQ, ts => parse_cp56(Timestamp)};
+  #{value => SPI, siq => SIQ, qds => (SIQ band ?SIQ_BITMASK), ts => parse_cp56(Timestamp)};
 
 %% Type 31. Double point information with time tag
 parse_information_element(?M_DP_TB_1, <<DIQ, Timestamp/binary>>) ->
   <<_Ignore:6, DPI:2>> = <<DIQ>>,
-  #{value => DPI, diq => DIQ, ts => parse_cp56(Timestamp)};
+  #{value => DPI, diq => DIQ, qds => (DIQ band ?DIQ_BITMASK), ts => parse_cp56(Timestamp)};
 
 %% Type 32. Step position information with time tag
 parse_information_element(?M_ST_TB_1, <<VTI, QDS, Timestamp/binary>>) ->
