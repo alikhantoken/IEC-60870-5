@@ -9,12 +9,14 @@
 
 -include("iec60870.hrl").
 -include("iec60870_asdu.hrl").
+-include("iec60870_diagnostics.hrl").
 
 %%% +--------------------------------------------------------------+
 %%% |                            OTP API                           |
 %%% +--------------------------------------------------------------+
 
 -export([
+  start_link/1,
   callback_mode/0,
   code_change/3,
   init/1,
@@ -38,7 +40,8 @@
   connection,
   current_connection,
   asdu,
-  state_acc
+  state_acc,
+  diagnostics
 }).
 
 %% To save the state of the connections (main or redundant)
@@ -100,10 +103,11 @@
 %%% |                  OTP behaviour implementation                |
 %%% +--------------------------------------------------------------+
 
-callback_mode() -> [
-  handle_event_function,
-  state_enter
-].
+start_link(Settings) ->
+  case gen_statem:start_link(iec60870_client_stm, {_OwnerPID = self(), Settings}, []) of
+    {ok, PID} -> PID;
+    {error, Error} -> throw(Error)
+  end.
 
 init({Owner, #{
   name := Name,
@@ -112,6 +116,24 @@ init({Owner, #{
   groups := Groups
 } = Settings}) ->
   process_flag(trap_exit, true),
+  Storage =
+    ets:new(data_objects, [
+      set,
+      public,
+      {read_concurrency, true},
+      {write_concurrency, auto}
+    ]),
+  Diagnostics =
+    ets:new(diagnostics, [
+      set,
+      protected,
+      {read_concurrency, true}
+    ]),
+  EsubscribePID =
+    case esubscribe:start_link(Name) of
+      {ok, PID} -> PID;
+      {error, Reason} -> exit(Reason)
+    end,
   Connections =
     case Settings of
       #{redundant_connection := RedundantSettings} when is_map(RedundantSettings) ->
@@ -119,19 +141,8 @@ init({Owner, #{
       _Other ->
         #{main => ConnectionSettings}
     end,
-  Storage = ets:new(data_objects, [
-    set,
-    public,
-    {read_concurrency, true},
-    {write_concurrency, auto}
-  ]),
   ASDU =
     iec60870_asdu:get_settings(maps:with(maps:keys(?DEFAULT_ASDU_SETTINGS), Settings)),
-  EsubscribePID =
-    case esubscribe:start_link(Name) of
-      {ok, PID} -> PID;
-      {error, Reason} -> exit(Reason)
-    end,
   ?LOGINFO("~p of type ~p starting...", [Name, Type]),
   {ok, #connecting{next_state = ?GI_INITIALIZATION, failed = []}, #data{
     type = Type,
@@ -142,8 +153,14 @@ init({Owner, #{
     name = Name,
     storage = Storage,
     asdu = ASDU,
-    groups = Groups
+    groups = Groups,
+    diagnostics = Diagnostics
   }}.
+
+callback_mode() -> [
+  handle_event_function,
+  state_enter
+].
 
 %%% +--------------------------------------------------------------+
 %%% |           Handling connection failure                        |
@@ -160,7 +177,6 @@ handle_event(
     CurrentConnection,
     Reason
   ]),
-  ?LOGINFO("~p connection ~p trying to restart connection",[Name, CurrentConnection]),
   {next_state, #connecting{next_state = CurrentState, error = Reason, failed = []}, Data};
 
 %%% +--------------------------------------------------------------+
@@ -208,11 +224,18 @@ handle_event(
   state_timeout,
   connect,
   #connecting{failed = Failed, next_state = NextState} = Connecting,
-  #data{current_connection = CurrentConnection, type = Type, connections = Connections, name = Name} = Data
+  #data{current_connection = CurrentConnection, type = Type, connections = Connections, name = Name, diagnostics = Diagnostics} = Data
 ) ->
-  Module = iec60870_lib:get_driver_module(Type),
   try
-    Connection = Module:start_client(maps:get(CurrentConnection, Connections)),
+    Module = iec60870_lib:get_driver_module(Type),
+    Configuration = maps:get(CurrentConnection, Connections),
+    Connection = Module:start_client(Configuration),
+    ?DIAGNOSTICS(Diagnostics, <<"connection">>, #{
+      <<"current">> => CurrentConnection,
+      <<"name">> => Name,
+      <<"type">> => Type,
+      <<"configuration">> => Configuration
+    }),
     ?LOGINFO("~p successfully started ~p connection", [Name, CurrentConnection]),
     {next_state, NextState, Data#data{connection = Connection}}
   catch
@@ -243,7 +266,7 @@ handle_event(
   state_timeout,
   init,
   ?GI_INITIALIZATION,
-  #data{owner = Owner, storage = Storage, groups = Groups} = Data
+  #data{owner = Owner, storage = Storage, diagnostics = Diagnostics, groups = Groups} = Data
 ) ->
   GIs = [?GI_STATE(G) || G <- Groups],
   % Init update events for not required groups. They are handled in the normal mode
@@ -254,7 +277,7 @@ handle_event(
     [G | Rest] ->
       {next_state, G#gi{rest = Rest}, Data};
     _ ->
-      Owner ! {ready, self(), Storage},
+      Owner ! {ready, self(), Storage, Diagnostics},
       {next_state, ?CONNECTED, Data}
   end;
 
@@ -360,8 +383,13 @@ handle_event(
   internal,
   #asdu{type = ?C_IC_NA_1, cot = ?COT_ACTTERM, pn = ?POSITIVE_PN, objects = [{_IOA, ID}]},
   #gi{state = run, id = ID, count = Count} = State,
-  #data{name = Name, state_acc = GroupItems, current_connection = CurrentConnection} = Data
+  #data{name = Name, state_acc = GroupItems, current_connection = CurrentConnection, diagnostics = Diagnostics} = Data
 ) ->
+  ?DIAGNOSTICS(Diagnostics, <<"general_interrogation">>, #{
+    <<"group">> => ID,
+    <<"confirmation">> => true,
+    <<"termination">> => true
+  }),
   ?LOGDEBUG("~p connection ~p general interrogation positive termination, group: ~p", [
     Name,
     CurrentConnection,
@@ -384,8 +412,13 @@ handle_event(
   internal,
   #asdu{type = ?C_IC_NA_1, cot = ?COT_ACTTERM, pn = ?NEGATIVE_PN, objects = [{_IOA, ID}]},
   #gi{state = run, id = ID} = State,
-  #data{name = Name, current_connection = CurrentConnection} = Data
+  #data{name = Name, current_connection = CurrentConnection, diagnostics = Diagnostics} = Data
 ) ->
+  ?DIAGNOSTICS(Diagnostics, <<"general_interrogation">>, #{
+    <<"group">> => ID,
+    <<"confirmation">> => true,
+    <<"termination">> => false
+  }),
   ?LOGDEBUG("~p connection ~p general interrogation negative termination, group: ~p", [Name, CurrentConnection, ID]),
   {next_state, State#gi{state = error}, Data};
 
@@ -449,11 +482,11 @@ handle_event(
   state_timeout,
   timeout,
   #gi{state = finish, update = Update, rest = RestGI, required = IsRequired} = State,
-  #data{owner = Owner, storage = Storage} = Data
+  #data{owner = Owner, storage = Storage, diagnostics = Diagnostics} = Data
 ) ->
   case {IsRequired, RestGI} of
     {true, []} ->
-      Owner ! {ready, self(), Storage};
+      Owner ! {ready, self(), Storage, Diagnostics};
     _ ->
       ignore
   end,
@@ -600,9 +633,16 @@ handle_event(
 handle_event(
   internal,
   #asdu{type = Type, cot = ?COT_ACTTERM, pn = ?POSITIVE_PN, objects = [{IOA, _}]},
-  #rc{state = run, ioa = IOA, type = Type, from = From},
-  #data{name = Name, current_connection = CurrentConnection} = Data
+  #rc{state = run, ioa = IOA, type = Type, from = From, value = Value},
+  #data{name = Name, current_connection = CurrentConnection, diagnostics = Diagnostics} = Data
 ) ->
+  ?DIAGNOSTICS(Diagnostics, <<"remote_control">>, #{
+    <<"address">> => IOA,
+    <<"type">> => Type,
+    <<"value">> => Value,
+    <<"confirmation">> => true,
+    <<"termination">> => true
+  }),
   ?LOGINFO("~p connection ~p remote control positive termination, ioa: ~p, type: ~p", [
     Name,
     CurrentConnection,
@@ -615,9 +655,16 @@ handle_event(
 handle_event(
   internal,
   #asdu{type = Type, cot = ?COT_ACTTERM, pn = ?NEGATIVE_PN, objects = [{IOA, _}]},
-  #rc{state = run, ioa = IOA, type = Type, from = From},
-  #data{name = Name, current_connection = CurrentConnection} = Data
+  #rc{state = run, ioa = IOA, type = Type, from = From, value = Value},
+  #data{name = Name, current_connection = CurrentConnection, diagnostics = Diagnostics} = Data
 ) ->
+  ?DIAGNOSTICS(Diagnostics, <<"remote_control">>, #{
+    <<"address">> => IOA,
+    <<"type">> => Type,
+    <<"value">> => Value,
+    <<"confirmation">> => true,
+    <<"termination">> => false
+  }),
   ?LOGWARNING("~p connection ~p remote control negative termination, ioa: ~p, type: ~p", [
     Name,
     CurrentConnection,
@@ -629,9 +676,15 @@ handle_event(
 handle_event(
   state_timeout,
   timeout,
-  #rc{state = run, ioa = IOA, type = Type, from = From},
-  #data{name = Name, current_connection = CurrentConnection} = Data
+  #rc{state = run, ioa = IOA, type = Type, from = From, value = Value},
+  #data{name = Name, current_connection = CurrentConnection, diagnostics = Diagnostics} = Data
 ) ->
+  ?DIAGNOSTICS(Diagnostics, <<"remote_control">>, #{
+    <<"address">> => IOA,
+    <<"type">> => Type,
+    <<"value">> => Value,
+    <<"timeout">> => true
+  }),
   ?LOGWARNING("~p connection ~p remote control termination timeout, ioa: ~p, type: ~p", [
     Name,
     CurrentConnection,
