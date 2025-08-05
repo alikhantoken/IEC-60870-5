@@ -9,7 +9,6 @@
 
 -include("iec60870.hrl").
 -include("iec60870_asdu.hrl").
--include("iec60870_diagnostics.hrl").
 
 %%% +--------------------------------------------------------------+
 %%% |                            OTP API                           |
@@ -230,7 +229,7 @@ handle_event(
     Module = iec60870_lib:get_driver_module(Type),
     Configuration = maps:get(CurrentConnection, Connections),
     Connection = Module:start_client(Configuration),
-    ?DIAGNOSTICS(Diagnostics, <<"connection">>, #{
+    iec60870_diagnostics:add(Diagnostics, <<"connection">>, #{
       <<"current">> => CurrentConnection,
       <<"name">> => Name,
       <<"type">> => Type,
@@ -385,7 +384,7 @@ handle_event(
   #gi{state = run, id = ID, count = Count} = State,
   #data{name = Name, state_acc = GroupItems, current_connection = CurrentConnection, diagnostics = Diagnostics} = Data
 ) ->
-  ?DIAGNOSTICS(Diagnostics, <<"general_interrogation">>, #{
+  iec60870_diagnostics:add(Diagnostics, <<"general_interrogation">>, #{
     <<"group">> => ID,
     <<"confirmation">> => true,
     <<"termination">> => true
@@ -414,7 +413,7 @@ handle_event(
   #gi{state = run, id = ID} = State,
   #data{name = Name, current_connection = CurrentConnection, diagnostics = Diagnostics} = Data
 ) ->
-  ?DIAGNOSTICS(Diagnostics, <<"general_interrogation">>, #{
+  iec60870_diagnostics:add(Diagnostics, <<"general_interrogation">>, #{
     <<"group">> => ID,
     <<"confirmation">> => true,
     <<"termination">> => false
@@ -636,7 +635,7 @@ handle_event(
   #rc{state = run, ioa = IOA, type = Type, from = From, value = Value},
   #data{name = Name, current_connection = CurrentConnection, diagnostics = Diagnostics} = Data
 ) ->
-  ?DIAGNOSTICS(Diagnostics, <<"remote_control">>, #{
+  iec60870_diagnostics:add(Diagnostics, <<"remote_control">>, #{
     <<"address">> => IOA,
     <<"type">> => Type,
     <<"value">> => Value,
@@ -658,7 +657,7 @@ handle_event(
   #rc{state = run, ioa = IOA, type = Type, from = From, value = Value},
   #data{name = Name, current_connection = CurrentConnection, diagnostics = Diagnostics} = Data
 ) ->
-  ?DIAGNOSTICS(Diagnostics, <<"remote_control">>, #{
+  iec60870_diagnostics:add(Diagnostics, <<"remote_control">>, #{
     <<"address">> => IOA,
     <<"type">> => Type,
     <<"value">> => Value,
@@ -679,7 +678,7 @@ handle_event(
   #rc{state = run, ioa = IOA, type = Type, from = From, value = Value},
   #data{name = Name, current_connection = CurrentConnection, diagnostics = Diagnostics} = Data
 ) ->
-  ?DIAGNOSTICS(Diagnostics, <<"remote_control">>, #{
+  iec60870_diagnostics:add(Diagnostics, <<"remote_control">>, #{
     <<"address">> => IOA,
     <<"type">> => Type,
     <<"value">> => Value,
