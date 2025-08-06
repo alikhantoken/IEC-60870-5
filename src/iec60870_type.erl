@@ -30,9 +30,6 @@
 -define(UNIX_EPOCH_DATE, {1970, 1, 1}).
 -define(UNIX_EPOCH_SECONDS, 62167219200).
 
--define(SIQ_BITMASK, 2#11111110).
--define(DIQ_BITMASK, 2#11111100).
-
 %%% +--------------------------------------------------------------+
 %%% |                           Parsing                            |
 %%% +--------------------------------------------------------------+
@@ -40,22 +37,22 @@
 %% Type 1. Single point information
 parse_information_element(?M_SP_NA_1, <<SIQ>>) ->
   <<_Ignore:7, SPI:1>> = <<SIQ>>,
-  #{value => SPI, siq => SIQ, qds => (SIQ band ?SIQ_BITMASK)};
+  #{value => SPI, siq => SIQ};
 
 %% Type 2. Single point information with time tag
 parse_information_element(?M_SP_TA_1, <<SIQ, Timestamp/binary>>) ->
   <<_Ignore:7, SPI:1>> = <<SIQ>>,
-  #{value => SPI, siq => SIQ, qds => (SIQ band ?SIQ_BITMASK), ts => parse_cp24(Timestamp)};
+  #{value => SPI, siq => SIQ, ts => parse_cp24(Timestamp)};
 
 %% Type 3. Double point information
 parse_information_element(?M_DP_NA_1, <<DIQ>>) ->
   <<_Ignore:6, DPI:2>> = <<DIQ>>,
-  #{value => DPI, diq => DIQ, qds => (DIQ band ?DIQ_BITMASK)};
+  #{value => DPI, diq => DIQ};
 
 %% Type 4. Double point information with time tag
 parse_information_element(?M_DP_TA_1, <<DIQ, Timestamp/binary>>) ->
   <<_Ignore:6, DPI:2>> = <<DIQ>>,
-  #{value => DPI, diq => DIQ, qds => (DIQ band ?DIQ_BITMASK), ts => parse_cp24(Timestamp)};
+  #{value => DPI, diq => DIQ, ts => parse_cp24(Timestamp)};
 
 %% Type 5. Step position information
 parse_information_element(?M_ST_NA_1, <<VTI, QDS>>) ->
@@ -133,12 +130,12 @@ parse_information_element(?M_ME_ND_1, <<NVA:16/little-signed>>) ->
 %% Type 30. Single point information with time tag
 parse_information_element(?M_SP_TB_1, <<SIQ, Timestamp/binary>>) ->
   <<_Ignore:7, SPI:1>> = <<SIQ>>,
-  #{value => SPI, siq => SIQ, qds => (SIQ band ?SIQ_BITMASK), ts => parse_cp56(Timestamp)};
+  #{value => SPI, siq => SIQ, ts => parse_cp56(Timestamp)};
 
 %% Type 31. Double point information with time tag
 parse_information_element(?M_DP_TB_1, <<DIQ, Timestamp/binary>>) ->
   <<_Ignore:6, DPI:2>> = <<DIQ>>,
-  #{value => DPI, diq => DIQ, qds => (DIQ band ?DIQ_BITMASK), ts => parse_cp56(Timestamp)};
+  #{value => DPI, diq => DIQ, ts => parse_cp56(Timestamp)};
 
 %% Type 32. Step position information with time tag
 parse_information_element(?M_ST_TB_1, <<VTI, QDS, Timestamp/binary>>) ->
