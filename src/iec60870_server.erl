@@ -207,7 +207,7 @@ init_server(Owner, #{
   ]),
   Diagnostics = ets:new(diagnostics, [
     set,
-    protected,
+    public,
     {read_concurrency, true}
   ]),
   EsubscribePID =
