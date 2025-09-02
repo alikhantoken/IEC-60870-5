@@ -43,7 +43,7 @@ add(Tab, Key, Value) ->
 
 remove(Tab, Key) ->
   try
-    ets:delete_object(Tab, Key)
+    ets:delete(Tab, Key)
   catch
     _Class:_Error ->
       ok
