@@ -35,9 +35,10 @@
 %%% +--------------------------------------------------------------+
 
 -export([
+  start_link/3,
+  init/1,
   callback_mode/0,
   code_change/3,
-  init/1,
   handle_event/4,
   terminate/3
 ]).
@@ -60,7 +61,8 @@
   settings,
   connection,
   send_queue,
-  update_queue
+  update_queue,
+  diagnostics
 }).
 
 -define(RUNNING, running).
@@ -69,29 +71,40 @@
 %%% |                  OTP behaviour implementation                |
 %%% +--------------------------------------------------------------+
 
-callback_mode() -> [
-  handle_event_function,
-  state_enter
-].
+start_link(Connection, Diagnostics, Settings) ->
+  gen_statem:start(?MODULE, [_Root = self(), Connection, Diagnostics, Settings], []).
 
-init({Root, Connection, #{
-  name := Name,
-  groups := Groups,
-  storage := Storage,
-  asdu := ASDUSettings
-} = Settings}) ->
+init([
+  Root,
+  Connection,
+  Diagnostics,
+  #{
+    name := Name,
+    groups := Groups,
+    storage := Storage,
+    asdu := ASDUSettings
+  } = Settings
+]) ->
   process_flag(trap_exit, true),
   link(Connection),
-  ?LOGINFO("~p starting state machine, root: ~p, connection: ~p", [Name, Root, Connection]),
   {ok, SendQueue} = iec60870_server_stm_send_queue:start_link(Name, Connection),
   {ok, UpdateQueue} = iec60870_server_stm_update_queue:start_link(Name, Storage, SendQueue, ASDUSettings),
   init_group_requests(Groups),
+  iec60870_diagnostics:add(Diagnostics, self(),
+    #{
+      <<"connection">> => #{
+        <<"configuration">> => ASDUSettings
+      }
+    }
+  ),
+  ?LOGINFO("~p starting state machine, root: ~p, connection: ~p", [Name, Root, Connection]),
   {ok, ?RUNNING, #state{
     root = Root,
     settings = Settings,
     connection = Connection,
     send_queue = SendQueue,
-    update_queue = UpdateQueue
+    update_queue = UpdateQueue,
+    diagnostics = Diagnostics
   }}.
 
 handle_event(enter, _PrevState, ?RUNNING, #state{settings = #{name := Name}} = _Data) ->
@@ -144,6 +157,7 @@ terminate(Reason, _, #state{
   update_queue = UpdateQueue,
   send_queue = SendQueue,
   connection = Connection,
+  diagnostics = Diagnostics,
   settings = #{
     name := Name
   }
@@ -151,11 +165,17 @@ terminate(Reason, _, #state{
   catch exit(SendQueue, shutdown),
   catch exit(UpdateQueue, shutdown),
   catch exit(Connection, shutdown),
+  iec60870_diagnostics:remove(Diagnostics, self()),
   ?LOGERROR("~p terminated w/ reason: ~p", [Name, Reason]),
   ok.
 
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
+
+callback_mode() -> [
+  handle_event_function,
+  state_enter
+].
 
 %%% +--------------------------------------------------------------+
 %%% |                      Internal functions                      |

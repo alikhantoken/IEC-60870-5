@@ -20,7 +20,8 @@
   write/3,
   subscribe/3, subscribe/2,
   unsubscribe/3, unsubscribe/2,
-  get_pid/1
+  get_pid/1,
+  diagnostics/1
 ]).
 
 %%% +--------------------------------------------------------------+
@@ -40,7 +41,8 @@
 -record(?MODULE, {
   storage,
   pid,
-  name
+  name,
+  diagnostics
 }).
 
 -record(state,{
@@ -49,7 +51,8 @@
   name,
   module,
   esubscribe,
-  connection_settings
+  settings,
+  diagnostics
 }).
 
 -define(COMMAND_HANDLER_ARITY, 4).
@@ -136,6 +139,9 @@ get_pid(#?MODULE{pid = PID}) ->
   PID;
 get_pid(_) ->
   throw(bad_arg).
+  
+diagnostics(#?MODULE{diagnostics = Diagnostics}) ->
+  ets:tab2list(Diagnostics).
 
 %%% +--------------------------------------------------------------+
 %%% |                Cross Module API Implementation               |
@@ -199,6 +205,11 @@ init_server(Owner, #{
     {read_concurrency, true},
     {write_concurrency, auto}
   ]),
+  Diagnostics = ets:new(diagnostics, [
+    set,
+    public,
+    {read_concurrency, true}
+  ]),
   EsubscribePID =
     case esubscribe:start_link(Name) of
       {ok, PID} -> PID;
@@ -207,7 +218,8 @@ init_server(Owner, #{
   Ref = #?MODULE{
     pid = self(),
     storage = Storage,
-    name = Name
+    name = Name,
+    diagnostics = Diagnostics
   },
   ConnectionSettings = #{
     name => Name,
@@ -227,7 +239,8 @@ init_server(Owner, #{
     type = Type,
     name = Name,
     esubscribe = EsubscribePID,
-    connection_settings = ConnectionSettings
+    settings = ConnectionSettings,
+    diagnostics = Diagnostics
   }).
 
 await_connection(#state{
@@ -235,11 +248,12 @@ await_connection(#state{
   server = Server,
   type = Type,
   name = Name,
-  connection_settings = ConnectionSettings
+  settings = Settings,
+  diagnostics = Diagnostics
 } = State) ->
   receive
     {start_connection, Server, From, Connection} ->
-      case gen_statem:start(iec60870_server_stm, {_Root = self(), Connection, ConnectionSettings}, []) of
+      case iec60870_server_stm:start_link(Connection, Diagnostics, Settings) of
         {ok, PID} ->
           From ! {self(), PID};
         {error, Error} ->

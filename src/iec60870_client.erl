@@ -29,7 +29,8 @@
 -record(?MODULE, {
   storage,
   pid,
-  name
+  name,
+  diagnostics
 }).
 
 %%% +--------------------------------------------------------------+
@@ -43,7 +44,8 @@
   read/1, read/2,
   subscribe/3, subscribe/2,
   unsubscribe/3, unsubscribe/2,
-  get_pid/1
+  get_pid/1,
+  diagnostics/1
 ]).
 
 %%% +---------------------------------------------------------------+
@@ -59,18 +61,15 @@
 %%% +---------------------------------------------------------------+
 
 start(InSettings) ->
-  #{name := Name} = Settings = check_settings(InSettings),
-  PID =
-    case gen_statem:start_link(iec60870_client_stm, {_OwnerPID = self(), Settings}, []) of
-      {ok, _PID} -> _PID;
-      {error, Error} -> throw(Error)
-    end,
+  Settings = check_settings(InSettings),
+  PID = iec60870_client_stm:start_link(Settings),
   receive
-    {ready, PID, Storage} ->
+    {ready, PID, Storage, Diagnostics} ->
       #?MODULE{
         pid = PID,
-        name = Name,
-        storage = Storage
+        name = maps:get(name, Settings),
+        storage = Storage,
+        diagnostics = Diagnostics
       };
     {'EXIT', PID, Reason} ->
       ?LOGERROR("startup failed, reason: ~p", [Reason]),
@@ -154,6 +153,9 @@ get_pid(#?MODULE{pid = PID}) ->
   PID;
 get_pid(_) ->
   throw(bad_arg).
+  
+diagnostics(#?MODULE{diagnostics = Diagnostics}) ->
+  ets:tab2list(Diagnostics).
 
 %% +---------------------------------------------------------------+
 %% |               Cross Module API Implementation                 |

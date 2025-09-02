@@ -27,7 +27,8 @@
 
 %% Utilities
 -export([
-  get_pid/1
+  get_pid/1,
+  diagnostics/1
 ]).
 
 start_server(ConnectionSettings) ->
@@ -71,3 +72,7 @@ read(ClientOrServer, Address) ->
 get_pid(ClientOrServer)->
   Module = element(1, ClientOrServer),
   Module:get_pid(ClientOrServer).
+  
+diagnostics(ClientOrServer)->
+  Module = element(1, ClientOrServer),
+  Module:diagnostics(ClientOrServer).
