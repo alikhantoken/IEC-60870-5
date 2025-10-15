@@ -17,7 +17,8 @@
   check_settings/1,
   start_link/1,
   send/2,
-  stop/1
+  stop/1,
+  send_sca/1
 ]).
 
 %%% +--------------------------------------------------------------+
@@ -51,6 +52,7 @@
 -define(START_DATA_CHAR, 16#68).
 -define(START_CMD_CHAR, 16#10).
 -define(END_CHAR, 16#16).
+-define(SINGLE_CHAR_ACK, 16#E5).
 
 %%% +--------------------------------------------------------------+
 %%% |                      API Implementation                      |
@@ -82,6 +84,16 @@ send(Port, Frame) ->
 stop(PortFT12) ->
   catch exit(PortFT12, shutdown).
 
+send_sca(Port) ->
+  case is_process_alive(Port) of
+    true ->
+      Port ! {send_sca, self()},
+      ok;
+    _ ->
+      ?LOGWARNING("failed to send SCA: port ~p is closed!", [Port]),
+      throw(serial_port_closed)
+  end.
+  
 %%% +--------------------------------------------------------------+
 %%% |                      Internal functions                      |
 %%% +--------------------------------------------------------------+
@@ -161,7 +173,13 @@ loop(#state{
       TailBuffer = parse(Owner, Name, <<Buffer/binary, Data/binary>>, AddressSize),
       ?LOGDEBUG("serial ~p tail buffer: ~p", [Name, TailBuffer]),
       loop(State#state{buffer = TailBuffer});
-
+    
+    {send_sca, _Any} ->
+      Packet = <<?SINGLE_CHAR_ACK>>,
+      ?LOGDEBUG("serial ~p sending single character ACK: ~p", [Name, Packet]),
+      send(Type, Connection, Packet),
+      loop(State);
+    
     {send, Owner, Frame} ->
       OutState =
         case Frame#frame.control_field of
@@ -213,13 +231,16 @@ send(serial, SerialPort, Data) ->
 parse(Owner, Name, BinaryData, AddressSize) ->
   case parse_frame(BinaryData, AddressSize) of
     {#frame{} = Frame, Tail} ->
-      ?LOGDEBUG("serial ~p received frame: ~p, data ~p", [Name, Frame, build_frame( Frame, AddressSize )]),
+      ?LOGDEBUG("serial ~p received frame: ~p, data ~p", [Name, Frame, build_frame(Frame, AddressSize)]),
       Owner ! {data, self(), Frame},
+      Tail;
+    {single_char_ack, Tail} ->
+      ?LOGDEBUG("serial ~p received single character ACK (E5h)", [Name]),
+      Owner ! {single_char_ack, self()},
       Tail;
     {_NoFrame, Tail} ->
       Tail
   end.
-
 parse_frame(Buffer, AddressSize) ->
   parse_frame(Buffer, AddressSize, none).
 
@@ -295,6 +316,8 @@ parse_frame(<<
   end;
 parse_frame(<<?START_DATA_CHAR, _/binary>> = Buffer, _AddressSize, LastFrame) when size(Buffer) < 4 ->
   {LastFrame, Buffer};
+parse_frame(<<?SINGLE_CHAR_ACK, Tail/binary>>, _AddressSize, _LastFrame) ->
+  {single_char_ack, Tail};
 parse_frame(<<_, Tail/binary>>, AddressSize, LastFrame) ->
   parse_frame(Tail, AddressSize, LastFrame);
 parse_frame(<<>>, _AddressSize, LastFrame) ->

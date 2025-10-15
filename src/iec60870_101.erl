@@ -270,6 +270,11 @@ wait_response(Response1, Response2, #state{
     {data, PortFT12, #frame{address = UnexpectedAddress}} when UnexpectedAddress =/= Address ->
       ?LOGWARNING("link address ~p received unexpected address: ~p", [Address, UnexpectedAddress]),
       wait_response(Response1, Response2, State);
+    {single_char_ack, PortFT12} when Response1 =:= ?ACKNOWLEDGE ->
+      {ok, single_char_ack};
+    {single_char_ack, PortFT12} ->
+      ?LOGDEBUG("link address ~p got unexpected single character ACK; ignoring", [Address]),
+      wait_response(Response1, Response2, State);
     {data, PortFT12, #frame{
       control_field = #control_field_response{function_code = ResponseCode}
     } = Response} when ResponseCode =:= Response1; ResponseCode =:= Response2 ->
@@ -373,3 +378,4 @@ check_setting({transport, PortSettings})
 
 check_setting(InvalidSetting) ->
   throw({invalid_setting, InvalidSetting}).
+
