@@ -117,6 +117,7 @@ loop(#data{
           ?LOGWARNING("~p link address ~p got check FCB error, CF: ~p, FCB: ~p", [Name, Address, CF, FCB]),
           case SentFrame of
             #frame{} -> send_response(Switch, SentFrame);
+            sca -> send_sca(Switch);
             _ -> ignore
           end,
           loop(Data)
@@ -141,7 +142,7 @@ handle_request(?RESET_REMOTE_LINK, _UserData, #data{
 } = Data) ->
   ?LOGDEBUG("~p link address ~p received [RESET LINK]", [Name, Address]),
   Data#data{
-    sent_frame = send_response(Switch, ?ACKNOWLEDGE_FRAME(Address))
+    sent_frame = send_sca(Switch)
   };
 
 handle_request(?RESET_USER_PROCESS, _UserData, #data{
@@ -152,7 +153,17 @@ handle_request(?RESET_USER_PROCESS, _UserData, #data{
   ?LOGDEBUG("~p link address ~p received [RESET USER PROCESS]", [Name, Address]),
   drop_asdu(),
   Data#data{
-    sent_frame = send_response(Switch, ?ACKNOWLEDGE_FRAME(Address))
+    sent_frame = send_sca(Switch)
+  };
+
+handle_request(?LINK_TEST, _UserData, #data{
+  switch = Switch,
+  address = Address,
+  name = Name
+} = Data) ->
+  ?LOGDEBUG("~p link address ~p received [LINK TEST]", [Name, Address]),
+  Data#data{
+    sent_frame = send_sca(Switch)
   };
 
 handle_request(?USER_DATA_CONFIRM, ASDU, #data{
@@ -164,7 +175,7 @@ handle_request(?USER_DATA_CONFIRM, ASDU, #data{
   ?LOGDEBUG("~p link address ~p received [USER DATA CONFIRM]", [Name, Address]),
   Connection ! {asdu, self(), ASDU},
   Data#data{
-    sent_frame = send_response(Switch, ?ACKNOWLEDGE_FRAME(Address))
+    sent_frame = send_sca(Switch)
   };
 
 handle_request(?USER_DATA_NO_REPLY, ASDU, #data{
@@ -261,6 +272,11 @@ handle_request(InvalidFC, _UserData, #data{name = Name, address = Address} = Dat
 send_response(Switch, Frame) ->
   Switch ! {send, self(), Frame},
   Frame.
+
+%% Send Single Character ACK (E5h) via FT1.2 process (Switch)
+send_sca(Switch) ->
+  Switch ! {send_sca, self()},
+  sca.
 
 check_data() ->
   receive

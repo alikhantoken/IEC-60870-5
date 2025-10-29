@@ -50,7 +50,6 @@
   address => ?REQUIRED,
   address_size => ?REQUIRED,
   on_request => undefined,
-  allow_sca => true,
   transport => #{
     name => undefined,
     baudrate => 9600,
@@ -312,6 +311,7 @@ wait_response(Response1, Response2, #state{
       error
   end.
 
+%% Retrying to connect and executing user-function
 retry(Fun, State) ->
   case connect(State) of
     error -> error;
@@ -336,6 +336,8 @@ build_request(FunctionCode, UserData, #state{
   }.
 
 %% FCB - Frame count bit
+%% Alternated between 0 to 1 for successive SEND / CONFIRM or
+%% REQUEST / RESPOND transmission procedures
 handle_fcb(FunctionCode, FCB) ->
   case FunctionCode of
     ?RESET_REMOTE_LINK   -> 0;
@@ -344,6 +346,8 @@ handle_fcb(FunctionCode, FCB) ->
   end.
 
 %% FCV - Frame count bit valid
+%% 1 - FCB is valid
+%% 0 - FCB is invalid
 handle_fcv(FunctionCode) ->
   case FunctionCode of
     ?REQUEST_DATA_CLASS_1 -> 1;
@@ -386,8 +390,6 @@ check_setting({on_request, OnRequest})
 
 check_setting({transport, PortSettings})
   when is_map(PortSettings) -> ok;
-
-check_setting({allow_sca, Allow}) when is_boolean(Allow) -> ok;
 
 check_setting(InvalidSetting) ->
   throw({invalid_setting, InvalidSetting}).
