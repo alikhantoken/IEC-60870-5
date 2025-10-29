@@ -50,7 +50,6 @@
   address => ?REQUIRED,
   address_size => ?REQUIRED,
   on_request => undefined,
-  allow_sca => true,
   transport => #{
     name => undefined,
     baudrate => 9600,
@@ -386,8 +385,6 @@ check_setting({on_request, OnRequest})
 
 check_setting({transport, PortSettings})
   when is_map(PortSettings) -> ok;
-
-check_setting({allow_sca, Allow}) when is_boolean(Allow) -> ok;
 
 check_setting(InvalidSetting) ->
   throw({invalid_setting, InvalidSetting}).
