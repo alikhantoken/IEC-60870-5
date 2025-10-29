@@ -305,7 +305,6 @@ wait_response(Response1, Response2, #state{
       error
   end.
 
-%% Retrying to connect and executing user-function
 retry(Fun, State) ->
   case connect(State) of
     error -> error;
@@ -330,8 +329,6 @@ build_request(FunctionCode, UserData, #state{
   }.
 
 %% FCB - Frame count bit
-%% Alternated between 0 to 1 for successive SEND / CONFIRM or
-%% REQUEST / RESPOND transmission procedures
 handle_fcb(FunctionCode, FCB) ->
   case FunctionCode of
     ?RESET_REMOTE_LINK   -> 0;
@@ -340,8 +337,6 @@ handle_fcb(FunctionCode, FCB) ->
   end.
 
 %% FCV - Frame count bit valid
-%% 1 - FCB is valid
-%% 0 - FCB is invalid
 handle_fcv(FunctionCode) ->
   case FunctionCode of
     ?REQUEST_DATA_CLASS_1 -> 1;
