@@ -183,6 +183,9 @@ reset_link(#state{
     {ok, _} ->
       ?LOGDEBUG("acknowledged [RESET LINK] from link address: ~p", [Address]),
       ok;
+    {nack, Reason} ->
+      ?LOGWARNING("negative acknowledgement to [RESET LINK] from link address: ~p, reason: ~p", [Address, Reason]),
+      error;
     error ->
       ?LOGWARNING("no response to [RESET LINK] from link address: ~p, ft12: ~p", [Address, PortFT12]),
       error
@@ -221,6 +224,9 @@ user_data_confirm(Attempts, ASDU, #state{
   case wait_response(?ACKNOWLEDGE, undefined, State) of
     {ok, _} ->
       ?UPDATE_FCB(State, Request);
+    {nack, Reason} ->
+      ?LOGWARNING("negative acknowledgement to [USER DATA CONFIRM] from link address: ~p, reason: ~p", [Address, Reason]),
+      user_data_confirm(Attempts - 1, ASDU, State);
     error ->
       ?LOGWARNING("no response to [USER DATA CONFIRM] from link address: ~p, ft12: ~p", [Address, PortFT12]),
       user_data_confirm(Attempts - 1, ASDU, State)
@@ -270,10 +276,19 @@ wait_response(Response1, Response2, #state{
     {data, PortFT12, #frame{address = UnexpectedAddress}} when UnexpectedAddress =/= Address ->
       ?LOGWARNING("link address ~p received unexpected address: ~p", [Address, UnexpectedAddress]),
       wait_response(Response1, Response2, State);
-    {data, PortFT12, #frame{
-      control_field = #control_field_response{function_code = ResponseCode}
-    } = Response} when ResponseCode =:= Response1; ResponseCode =:= Response2 ->
+    {single_char_ack, PortFT12} when Response1 =:= ?ACKNOWLEDGE ->
+      {ok, single_char_ack};
+    {single_char_ack, PortFT12} ->
+      ?LOGDEBUG("link address ~p got unexpected single character ACK; ignoring", [Address]),
+      wait_response(Response1, Response2, State);
+    {data, PortFT12, #frame{ control_field = #control_field_response{function_code = ResponseCode} } = Response}
+      when ResponseCode =:= Response1; ResponseCode =:= Response2 ->
       {ok, Response};
+    {data, PortFT12, #frame{ control_field = #control_field_response{function_code = Resp} } = R}
+    when (Response1 =:= ?ACKNOWLEDGE) andalso 
+        (Resp =:= ?NACK_LINK_BUSY orelse Resp =:= ?ERR_NOT_FUNCTIONING orelse Resp =:= ?ERR_NOT_IMPLEMENTED) ->
+        {nack, R};
+
     {data, PortFT12, #frame{control_field = #control_field_request{}} = Frame} when is_function(OnRequest) ->
       ?LOGDEBUG("link address ~p received request while waiting for response, request: ~p", [Address, Frame]),
       OnRequest(Frame),
@@ -290,7 +305,6 @@ wait_response(Response1, Response2, #state{
       error
   end.
 
-%% Retrying to connect and executing user-function
 retry(Fun, State) ->
   case connect(State) of
     error -> error;
@@ -315,8 +329,6 @@ build_request(FunctionCode, UserData, #state{
   }.
 
 %% FCB - Frame count bit
-%% Alternated between 0 to 1 for successive SEND / CONFIRM or
-%% REQUEST / RESPOND transmission procedures
 handle_fcb(FunctionCode, FCB) ->
   case FunctionCode of
     ?RESET_REMOTE_LINK   -> 0;
@@ -325,14 +337,11 @@ handle_fcb(FunctionCode, FCB) ->
   end.
 
 %% FCV - Frame count bit valid
-%% 1 - FCB is valid
-%% 0 - FCB is invalid
 handle_fcv(FunctionCode) ->
   case FunctionCode of
     ?REQUEST_DATA_CLASS_1 -> 1;
     ?REQUEST_DATA_CLASS_2 -> 1;
     ?USER_DATA_CONFIRM    -> 1;
-    ?LINK_TEST            -> 1;
     _Other -> 0
   end.
 
