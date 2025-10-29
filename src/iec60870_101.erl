@@ -206,9 +206,6 @@ request_status_link(#state{
     {ok, _} ->
       ?LOGDEBUG("acknowledged [REQUEST STATUS LINK] from link address: ~p", [Address]),
       ok;
-    {nack, Reason} ->
-      ?LOGWARNING("negative acknowledgement to [REQUEST STATUS LINK] from link address: ~p, reason: ~p", [Address, Reason]),
-      error;
     error ->
       ?LOGWARNING("no response to [REQUEST STATUS LINK] from link address: ~p, ft12: ~p", [Address, PortFT12]),
       error
@@ -256,9 +253,6 @@ data_class(Attempts, DataClassCode, #state{
     {ok, #frame{control_field = #control_field_response{function_code = ?NACK_DATA_NOT_AVAILABLE, acd = ACD}}} ->
       NewState = ?UPDATE_FCB(State, Request),
       {NewState, ACD, undefined};
-    {nack, Reason} ->
-      ?LOGWARNING("negative acknowledgement to [DATA CLASS REQUEST] from link address: ~p, reason: ~p", [Address, Reason]),
-      data_class(Attempts - 1, DataClassCode, State);
     error ->
       ?LOGWARNING("no response to [DATA CLASS REQUEST] from link address: ~p, ft12: ~p", [Address, PortFT12]),
       data_class(Attempts - 1, DataClassCode, State)
