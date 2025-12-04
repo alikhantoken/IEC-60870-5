@@ -468,22 +468,32 @@ handle_packet(u, ?START_DT_CONFIRM, #state{
   settings = #{port := Port},
   type = Type
 } = State) ->
-  ?LOGWARNING("~p on port ~p received unexpected [START CONFIRM] packet", [Type, Port]),
+  ?LOGWARNING("~p on port ~p received unexpected start dt confirm", [Type, Port]),
   State;
 
 handle_packet(u, ?TEST_FRAME_ACTIVATE, #state{
+  settings = #{port := Port},
+  type = Type,
   socket = Socket
 } = State) ->
+  ?LOGDEBUG("~p on port ~p received test frame activate", [Type, Port]),
   socket_send(Socket, create_u_packet(?TEST_FRAME_CONFIRM)),
   State;
 
 handle_packet(u, ?TEST_FRAME_CONFIRM, #state{
+  settings = #{port := Port},
+  type = Type,
   t3 = {confirm, Timer}
 } = State) ->
+  ?LOGWARNING("~p on port ~p received test frame confirm", [Type, Port]),
   reset_timer(t3, Timer),
   State#state{t3 = undefined};
 
-handle_packet(u, _Data, State) ->
+handle_packet(u, Data, #state{
+  settings = #{port := Port},
+  type = Type
+} = State) ->
+  ?LOGWARNING("~p on port ~p received unexpected u-frame: ~p", [Type, Port, Data]),
   % TODO: Is it correct to ignore other types of U packets?
   State;
 
