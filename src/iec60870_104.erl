@@ -208,11 +208,14 @@ loop(#state{
   },
   type = Type,
   socket = Socket,
-  sent = Sent
+  sent = Sent,
+  vs = VS,
+  vr = VR
 } = State) ->
   receive
     % Data is received from the transport level (TCP)
     {tcp, Socket, Data} ->
+      ?LOGDEBUG("~p on port ~p received data from tcp, vs: ~p, vr: ~p, data: ~p", [Type, Port, VS, VR, Data]),
       NewState = parse_data(Data, State),
       loop(NewState);
 
@@ -498,8 +501,11 @@ handle_packet(s, ReceiveCounter, State) ->
 %% Note: sending an acknowledge because the number of
 %%       unacknowledged i-packets is reached its limit.
 handle_packet(i, Packet, #state{
-  vw = 1
+  vw = 1,
+  settings = #{port := Port},
+  type = Type
 } = State) ->
+  ?LOGDEBUG("~p on port ~p sending confirmation to received packets", [Type, Port]),
   State1 = handle_packet(i, Packet, State#state{vw = 0}),
   confirm_received_counter(State1);
 
@@ -512,6 +518,7 @@ handle_packet(i, {SendCounter, ReceiveCounter, ASDU}, #state{
   settings = #{port := Port},
   type = Type
 } = State) when SendCounter =:= VR ->
+  ?LOGDEBUG("~p on port ~p received packet-i, vr: ~p, vw: ~p, sc: ~p, rc: ~p", [Type, Port, VR, VW, SendCounter, ReceiveCounter]),
   Connection ! {asdu, self(), ASDU},
   NewState = start_t2(State),
   NewVR =
@@ -632,9 +639,10 @@ confirm_sent_counter(ReceiveCounter, #state{
   reset_timer(t1, PrevTimer),
   Unconfirmed = [S || S <- Sent, (ReceiveCounter + (OverflowCount * (?MAX_COUNTER + 1))) < S],
 
-  ?LOGDEBUG("~p on port ~p confirmation of sent packets, overflow count: ~p, sent length: ~p, unconfirmed length: ~p", [
+  ?LOGDEBUG("~p on port ~p confirmation of sent packets, receive counter: ~p, overflow count: ~p, sent length: ~p, unconfirmed length: ~p", [
     Type,
     Port,
+    ReceiveCounter,
     OverflowCount,
     length(Sent),
     length(Unconfirmed)
