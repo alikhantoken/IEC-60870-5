@@ -98,19 +98,6 @@ start_server(InSettings) ->
     {ok, ListenSocket} ->
       accept_connection(ListenSocket, Settings, Root),
       ListenSocket;
-    {error, eaddrinuse} ->
-      timer:sleep(?RESTART_WAIT),
-      ?LOGWARNING("port ~p is already in use - attempting to reuse", [Port]),
-      ?LOGWARNING("potential conflict: ensure no other applications are using that port"),
-      ?LOGWARNING("attempting to open port ~p in shared mode", [Port]),
-      case gen_tcp:listen(Port, [{reuseaddr, true} | SocketParams]) of
-        {ok, ListenSocket} ->
-          ?LOGWARNING("port ~p is opened in shared mode", [Port]),
-          accept_connection(ListenSocket, Settings, Root),
-          ListenSocket;
-        {error, Reason} ->
-          throw({server_listener_start_failure, Reason})
-      end;
     {error, Reason} ->
       throw({server_listener_start_failure, Reason})
   end.
@@ -256,7 +243,18 @@ init_client(Attempts, Owner, #{
   host := Host,
   port := Port
 } = Settings) when Attempts > 0 ->
-  case gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}], ?CONNECT_TIMEOUT) of
+  case gen_tcp:connect(
+    Host,
+    Port,
+    [
+      binary,
+      {active, true},
+      {packet, raw},
+      {nodelay, true},
+      {keepalive, true}
+    ],
+    ?CONNECT_TIMEOUT
+  ) of
     {ok, Socket} ->
       socket_send(Socket, create_u_packet(?START_DT_ACTIVATE)),
       ?LOGDEBUG("~p:~p sending [START ACTIVATE]", [Host, Port]),
@@ -314,7 +312,7 @@ handle_command(t1, #state{
   settings = #{port := Port},
   type = Type
 }) ->
-  ?LOGERROR("~p on port ~p packets confirmation timeout!", [Type, Port]),
+  ?LOGERROR("~p on port ~p packets confirmation timeout T1!", [Type, Port]),
   exit(confirmation_timeout);
 
 %% T2 - Acknowledge timeout
@@ -325,12 +323,14 @@ handle_command(t2, State) ->
 handle_command(t3, #state{
   t3 = {init, _Timer},
   socket = Socket,
-  settings = #{t1 := T1}
+  type = Type,
+  settings = #{t1 := T1, port := Port}
 } = State) ->
   socket_send(Socket, create_u_packet(?TEST_FRAME_ACTIVATE)),
   % We start the t3 timer with T1 duration because according to
   % IEC 60870-5-104 the confirmation of test frame should be sent back
   % within T1
+  ?LOGDEBUG("~p on port ~p initialize timer-T3", [Type, Port]),
   Timer = init_timer(t3, T1),
   State#state{t3 = {confirm, Timer}};
 
@@ -373,6 +373,8 @@ split_into_packets(<<?START_BYTE>>, Packets) ->
   {lists:reverse(Packets), <<>>};
 split_into_packets(<<>>, Packets) ->
   {lists:reverse(Packets), <<>>};
+split_into_packets(<<_Byte, Rest/binary>>, Packets) ->
+  split_into_packets(Rest, Packets);
 split_into_packets(InvalidData, _) ->
   throw({invalid_input_data_format, InvalidData}).
 
@@ -475,8 +477,11 @@ handle_packet(u, ?TEST_FRAME_ACTIVATE, #state{
   State;
 
 handle_packet(u, ?TEST_FRAME_CONFIRM, #state{
-  t3 = {confirm, Timer}
+  settings = #{port := Port},
+  t3 = {confirm, Timer},
+  type = Type
 } = State) ->
+  ?LOGDEBUG("~p on port ~p reset timer-T3", [Type, Port]),
   reset_timer(t3, Timer),
   State#state{t3 = undefined};
 
@@ -513,6 +518,7 @@ handle_packet(i, {SendCounter, ReceiveCounter, ASDU}, #state{
   type = Type
 } = State) when SendCounter =:= VR ->
   Connection ! {asdu, self(), ASDU},
+  ?LOGDEBUG("~p on port ~p start timer-T2", [Type, Port]),
   NewState = start_t2(State),
   NewVR =
     case VR >= ?MAX_COUNTER of
@@ -629,6 +635,7 @@ confirm_sent_counter(ReceiveCounter, #state{
   settings = #{t1 := T1, port := Port},
   type = Type
 } = State) ->
+  ?LOGDEBUG("~p on port ~p reset timer-T1", [Type, Port]),
   reset_timer(t1, PrevTimer),
   Unconfirmed = [S || S <- Sent, (ReceiveCounter + (OverflowCount * (?MAX_COUNTER + 1))) < S],
 
@@ -646,8 +653,11 @@ confirm_sent_counter(ReceiveCounter, #state{
   % the confirmation may be longer than the T1 setting
   Timer =
     if
-      length(Unconfirmed) > 0 -> init_timer(t1, T1);
-      true -> undefined
+      length(Unconfirmed) > 0 ->
+        ?LOGDEBUG("~p on port ~p initialize timer-T1", [Type, Port]),
+        init_timer(t1, T1);
+      true ->
+        undefined
     end,
 
   State#state{
@@ -665,9 +675,10 @@ confirm_received_counter(#state{
     port := Port
   }
 } = State) ->
-  ?LOGDEBUG("~p on port ~p received packets confirmation, receive counter: ~p", [Type, Port, VR]),
+  ?LOGDEBUG("~p on port ~p received confirmation packet, receive counter: ~p", [Type, Port, VR]),
   UpdatedVR = create_s_packet(VR),
   socket_send(Socket, UpdatedVR),
+  ?LOGDEBUG("~p on port ~p reset timer-T2", [Type, Port]),
   reset_timer(t2, Timer),
   State#state{
     vw = W,
@@ -679,8 +690,10 @@ start_t1(#state{
 } = State) when is_reference(Timer) ->
   State;
 start_t1(#state{
-  settings = #{t1 := T1}
+  settings = #{t1 := T1, port := Port},
+  type = Type
 } = State) ->
+  ?LOGDEBUG("~p on port ~p initialize timer-T1", [Type, Port]),
   State#state{
     t1 = init_timer(t1, T1)
   }.
@@ -690,29 +703,38 @@ start_t2(#state{
 } = State) when is_reference(Timer) ->
   State;
 start_t2(#state{
-  settings = #{t2 := T2}
+  settings = #{t2 := T2, port := Port},
+  type = Type
 } = State) ->
+  ?LOGDEBUG("~p on port ~p initialize timer-T2", [Type, Port]),
   State#state{
     t2 = init_timer(t2, T2)
   }.
 
 start_t3(#state{
+  settings = #{port := Port},
+  type = Type,
   t3 = {confirm, _}
 } = State) ->
+  ?LOGDEBUG("~p on port ~p confirm timer-T3", [Type, Port]),
   State;
 
 start_t3(#state{
+  type = Type,
   t3 = {_, PrevTimer},
-  settings = #{t3 := T3}
+  settings = #{t3 := T3, port := Port}
 } = State) ->
+  ?LOGDEBUG("~p on port ~p restart timer-T3", [Type, Port]),
   Timer = restart_timer(t3, T3, PrevTimer),
   State#state{
     t3 = {init, Timer}
   };
 
 start_t3(#state{
-  settings = #{t3 := T3}
+  type = Type,
+  settings = #{t3 := T3, port := Port}
 } = State) ->
+  ?LOGDEBUG("~p on port ~p initialize timer-T3", [Type, Port]),
   Timer = init_timer(t3, T3),
   State#state{
     t3 = {init, Timer}
