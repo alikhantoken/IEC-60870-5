@@ -211,7 +211,7 @@ handle_asdu(#asdu{
              [{_, Map}] -> Map;
              _ -> #{type => Type, group => undefined}
            end,
-         MergedObject = {IOA, maps:merge(OldObject, NewObject)},
+         MergedObject = {IOA, iec60870_lib:merge_objects(OldObject, NewObject)},
          ets:insert(Storage, MergedObject),
          UpdateQueuePID ! {Name, update, MergedObject, none, UpdateQueuePID}
          end
