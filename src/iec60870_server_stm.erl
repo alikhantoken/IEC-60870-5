@@ -205,7 +205,7 @@ handle_asdu(#asdu{
   case IOUpdatesEnabled of
     true ->
       [begin
-         {IOA, NewObject} = Object,
+         NewObject = Object#{ type => Type },
          OldObject =
            case ets:lookup(Storage, IOA) of
              [{_, Map}] -> Map;
@@ -215,7 +215,7 @@ handle_asdu(#asdu{
          ets:insert(Storage, MergedObject),
          UpdateQueuePID ! {Name, update, MergedObject, none, UpdateQueuePID}
          end
-        || Object <- Objects];
+        || {IOA, Object} <- Objects];
     false ->
       ignore
   end,
