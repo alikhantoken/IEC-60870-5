@@ -524,6 +524,8 @@ handle_event(
 ) ->
   NextItems = [Object || {Object, _Node, A} <- esubscribe:lookup(Name, update), A =/= self()],
   MergedObject = {IOA, merge_existing_io(IOA, Value, Storage)},
+  esubscribe:notify(Name, update, {IOA, MergedObject}),
+  esubscribe:notify(Name, IOA, MergedObject),
   send_items([MergedObject | NextItems], Connection, ?COT_SPONT, ASDUSettings),
   keep_state_and_data;
 
