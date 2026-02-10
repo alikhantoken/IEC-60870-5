@@ -102,6 +102,18 @@ switch_loop(#state{
       end,
       switch_loop(State);
 
+      % Forward SCA requests from server to FT1.2
+    {send_sca, ServerPID} ->
+      case lists:member(ServerPID, maps:values(Servers)) of
+        true  -> iec60870_ft12:send_sca(PortFT12);
+        false -> ?LOGWARNING("~p received send_sca from unknown server ~p", [Name, ServerPID])
+      end,
+      switch_loop(State);
+
+    {single_char_ack, PortFT12} ->
+      ?LOGDEBUG("~p received single character ACK from line; ignoring", [Name]),
+      switch_loop(State);
+
     % Handle send requests from the server
     {send, ServerPID, Frame = #frame{address = LinkAddress}} ->
       % Checking if the link address is served by a switch
