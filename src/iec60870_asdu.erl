@@ -28,7 +28,7 @@
 -define(SQ_CONTINUOUS, 1).
 
 %% Packet capacity
--define(MAX_PACKET_BYTE_SIZE, 255).
+-define(MAX_PACKET_BYTE_SIZE, 253).
 
 %% Constant sizes of header content
 -define(TRANSPORT_CONSTANT_COST, 4).
